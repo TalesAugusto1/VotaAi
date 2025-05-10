@@ -457,14 +457,6 @@ export const votingPoolsApi = {
       throw new Error("Authentication required");
     }
 
-    console.log("Creating voting pool with data:", {
-      title: poolData.title,
-      category: poolData.category,
-      options: poolData.options.length,
-      hasMainImage: !!mainImage,
-      optionImagesCount: optionImages.filter(Boolean).length,
-    });
-
     const formData = new FormData();
 
     // Add main pool data
@@ -475,6 +467,7 @@ export const votingPoolsApi = {
     formData.append("endDate", poolData.endDate.toISOString());
 
     // Important: Convert boolean to lowercase string "true" or "false"
+    // This ensures proper handling on the server
     formData.append("anonymous", poolData.anonymous ? "true" : "false");
 
     // Add options as JSON string
@@ -491,18 +484,18 @@ export const votingPoolsApi = {
 
     // Add main image if available
     if (mainImage) {
-      console.log("Preparing main image for upload:", {
+      console.log("Preparing to upload main image:", {
         uri: mainImage.uri,
         type: mainImage.mimeType,
-        fileName: mainImage.fileName,
+        name: mainImage.fileName
       });
 
       const fileToUpload = {
         uri: mainImage.uri,
-        type: mainImage.mimeType || "image/jpeg",
-        name: mainImage.fileName || "pool-image.jpg",
+        type: mainImage.mimeType || 'image/jpeg',
+        name: mainImage.fileName || 'pool-image.jpg'
       };
-
+      
       // Important: Field name MUST be "image" to match backend expectation
       formData.append("image", fileToUpload as any);
     }
@@ -512,44 +505,44 @@ export const votingPoolsApi = {
     optionImages.forEach((image, index) => {
       if (image) {
         hasOptionImages = true;
-        console.log(`Preparing option ${index} image for upload:`, {
+        console.log(`Preparing to upload option ${index} image:`, {
           uri: image.uri,
           type: image.mimeType,
-          fileName: image.fileName,
+          name: image.fileName
         });
 
         const fileToUpload = {
           uri: image.uri,
-          type: image.mimeType || "image/jpeg",
-          name: image.fileName || `option${index}.jpg`,
+          type: image.mimeType || 'image/jpeg',
+          name: image.fileName || `option${index}.jpg`
         };
-
-        // Important: Field name MUST be "option0", "option1", etc. to match backend expectation
+        
+        // Important: Field name MUST be "option0", "option1", etc.
         formData.append(`option${index}`, fileToUpload as any);
       }
     });
 
-    // Add flag if we have option images
+    // Only set hasOptionImages flag if we actually have option images
     if (hasOptionImages) {
       formData.append("hasOptionImages", "true");
     }
 
-    // URL for the API endpoint
+    // Use standard URL for the endpoint
     const url = `${API_BASE_URL}/api/voting-pools`;
 
-    // Get auth headers
+    // Get auth headers without Content-Type (will be set by FormData)
     const headers = await getAuthHeaders();
-    console.log("Auth token retrieved for pool creation");
+    console.log("Creating voting pool with auth token");
 
-    // Log FormData entries for debugging
-    console.log("FormData entries:");
+    // Log FormData for debugging
     try {
+      console.log("FormData entries:");
       for (const pair of (formData as any).entries()) {
-        if (typeof pair[1] === "object" && pair[1].uri) {
+        if (typeof pair[1] === 'object') {
           console.log(`${pair[0]}: [File Object]`, {
-            uri: pair[1].uri.substring(0, 30) + "...",
+            uri: pair[1].uri ? 'Present' : 'Missing',
             type: pair[1].type,
-            name: pair[1].name,
+            name: pair[1].name
           });
         } else {
           console.log(`${pair[0]}: ${pair[1]}`);
@@ -559,14 +552,14 @@ export const votingPoolsApi = {
       console.log("Could not log FormData entries:", e);
     }
 
-    console.log("Making API request to:", url);
-
+    // Make the request
     const response = await fetch(url, {
       method: "POST",
       headers,
       body: formData,
     });
 
+    // Log response status
     console.log("Create voting pool response status:", response.status);
 
     if (!response.ok) {
@@ -761,33 +754,4 @@ export const resultsApi = {
       // Create headers manually for more control
       const headers: Record<string, string> = {
         Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      };
-
-      console.log(
-        "Fetching results with token:",
-        token ? "Present" : "Missing"
-      );
-
-      const response = await fetch(url, {
-        headers,
-      });
-
-      console.log("Fetching results response status:", response.status);
-
-      if (!response.ok) {
-        console.error("Error fetching results:", response.status);
-        throw new Error(
-          `Failed to fetch results. Server returned status ${response.status}`
-        );
-      }
-
-      const data = await response.json();
-      console.log("Results fetched successfully");
-      return data;
-    } catch (error) {
-      console.error("Get user voted pools results error:", error);
-      return [];
-    }
-  },
-};
+        Authorization: `
