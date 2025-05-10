@@ -1,3 +1,4 @@
+import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import { User, Vote, VotingOption, VotingPool } from "../types";
 
@@ -447,8 +448,8 @@ export const votingPoolsApi = {
       address?: string;
       options: { text: string; description?: string }[];
     },
-    mainImage?: any,
-    optionImages: any[] = []
+    mainImage?: ImagePicker.ImagePickerAsset | null,
+    optionImages: (ImagePicker.ImagePickerAsset | null)[] = []
   ): Promise<VotingPool> {
     const token = await getToken();
 
@@ -458,13 +459,19 @@ export const votingPoolsApi = {
 
     const formData = new FormData();
 
-    // Add main pool data
+    // Add main pool data as strings (except anonymous which needs special handling)
     formData.append("title", poolData.title);
     formData.append("description", poolData.description);
     formData.append("category", poolData.category);
     formData.append("startDate", poolData.startDate.toISOString());
     formData.append("endDate", poolData.endDate.toISOString());
-    formData.append("anonymous", String(poolData.anonymous));
+
+    // Handle anonymous flag properly - use 0/1 instead of string true/false
+    // Many backends automatically convert numeric values to booleans
+    formData.append("anonymous", poolData.anonymous ? "1" : "0");
+
+    // Add options as a string since FormData can't directly handle complex objects
+    formData.append("options", JSON.stringify(poolData.options));
 
     // Add location data if available
     if (poolData.latitude && poolData.longitude) {
@@ -475,35 +482,88 @@ export const votingPoolsApi = {
 
     // Add main image if available
     if (mainImage) {
-      formData.append("image", mainImage);
+      const fileToUpload = {
+        uri: mainImage.uri,
+        type: mainImage.mimeType || "image/jpeg",
+        name: mainImage.fileName || "image.jpg",
+      };
+      formData.append("image", fileToUpload as any);
     }
 
-    // Add options
-    formData.append("options", JSON.stringify(poolData.options));
+    // Check if we have option images
+    const hasOptionImages = optionImages.some((img) => img !== null);
 
-    // Add option images if available
-    if (optionImages.length > 0) {
+    // Add option images flag if needed
+    if (hasOptionImages) {
       formData.append("hasOptionImages", "true");
+
+      // Add each option image with the correct field name
       optionImages.forEach((image, index) => {
         if (image) {
-          formData.append(`option${index}`, image);
+          const fileToUpload = {
+            uri: image.uri,
+            type: image.mimeType || "image/jpeg",
+            name: image.fileName || `option${index}.jpg`,
+          };
+          formData.append(`option${index}`, fileToUpload as any);
         }
       });
     }
+
+    // Build the URL for the API endpoint
+    const url = `${API_BASE_URL}/api/voting-pools`;
 
     // Get auth headers without Content-Type (will be set by FormData)
     const headers = await getAuthHeaders();
     console.log("Creating voting pool with auth token");
 
-    const response = await fetch(`${API_BASE_URL}/api/voting-pools`, {
+    // Log FormData fields for debugging
+    console.log("FormData fields being sent:");
+    try {
+      for (const pair of (formData as any).entries()) {
+        console.log(
+          `${pair[0]}: ${typeof pair[1] === "object" ? "File" : pair[1]}`
+        );
+      }
+    } catch (e) {
+      console.log("Could not log FormData entries:", e);
+    }
+
+    console.log("URL with query params:", url);
+
+    const response = await fetch(url, {
       method: "POST",
       headers,
       body: formData,
     });
 
+    // Log response status
+    console.log("Create voting pool response status:", response.status);
+
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to create voting pool");
+      try {
+        const errorData = await response.json();
+        console.error("Error creating voting pool:", errorData);
+        throw new Error(errorData.message || "Failed to create voting pool");
+      } catch (jsonError) {
+        // If error response isn't JSON, try to get raw text
+        try {
+          const errorText = await response.text();
+          console.error("Error response (non-JSON):", errorText);
+          throw new Error(
+            "Failed to create voting pool: " +
+              (errorText.length > 100
+                ? errorText.substring(0, 100) + "..."
+                : errorText)
+          );
+        } catch (textError) {
+          // If we can't even get text
+          console.error("Error response could not be read as text:", textError);
+          throw new Error(
+            `Failed to create voting pool. Server returned status ${response.status}`
+          );
+        }
+      }
     }
 
     const data = await response.json();

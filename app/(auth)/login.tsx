@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -76,7 +77,33 @@ export default function LoginScreen() {
       // The AuthContext will handle the redirect after successful login
     } catch (err) {
       console.error("Login error:", err);
-      setError("Falha ao fazer login. Tente novamente.");
+
+      // More descriptive error messages based on the error
+      let errorMessage = "Falha ao fazer login. Tente novamente.";
+
+      if (err instanceof Error) {
+        if (err.message.includes("Invalid credentials")) {
+          errorMessage =
+            "CPF ou senha incorretos. Verifique e tente novamente.";
+        } else if (err.message.includes("Network")) {
+          errorMessage =
+            "Erro de conexão. Verifique sua internet e tente novamente.";
+        } else if (err.message.includes("timeout")) {
+          errorMessage =
+            "Tempo de conexão esgotado. Tente novamente mais tarde.";
+        } else if (err.message.includes("token")) {
+          errorMessage = "Erro de autenticação. Por favor, tente novamente.";
+        }
+      }
+
+      // Display error message
+      setError(errorMessage);
+
+      // Vibrate to indicate error
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+      // Optionally clear the password for security
+      setPassword("");
     }
   };
 
@@ -84,6 +111,10 @@ export default function LoginScreen() {
   React.useEffect(() => {
     if (authError) {
       setError(authError);
+      // Clear password field on auth error for security
+      setPassword("");
+      // Provide haptic feedback
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   }, [authError]);
 
@@ -133,11 +164,26 @@ export default function LoginScreen() {
         />
 
         {error ? (
-          <ThemedText style={styles.errorText}>{error}</ThemedText>
+          <View style={styles.errorContainer}>
+            <ThemedText style={styles.errorText}>{error}</ThemedText>
+            {error.includes("conexão") && (
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={handleLogin}
+              >
+                <ThemedText style={styles.retryText}>
+                  Tentar Novamente
+                </ThemedText>
+              </TouchableOpacity>
+            )}
+          </View>
         ) : null}
 
         <TouchableOpacity
-          style={styles.loginButton}
+          style={[
+            styles.loginButton,
+            error ? styles.loginButtonWithError : null,
+          ]}
           onPress={handleLogin}
           disabled={isLoading}
         >
@@ -148,12 +194,35 @@ export default function LoginScreen() {
           )}
         </TouchableOpacity>
 
+        <View style={styles.forgotPasswordContainer}>
+          <TouchableOpacity
+            onPress={() => {
+              // For now just show an alert - you can implement password recovery later
+              Alert.alert(
+                "Recuperação de Senha",
+                "Entre em contato com o administrador para redefinir sua senha.",
+                [{ text: "OK", onPress: () => console.log("OK Pressed") }]
+              );
+            }}
+          >
+            <ThemedText style={styles.forgotPasswordText}>
+              Esqueceu sua senha?
+            </ThemedText>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <ThemedText style={styles.dividerText}>ou</ThemedText>
+          <View style={styles.dividerLine} />
+        </View>
+
         <TouchableOpacity
-          style={styles.registerLink}
+          style={styles.registerButton}
           onPress={() => router.push("/(auth)/register")}
         >
-          <ThemedText style={styles.registerText}>
-            Não tem uma conta? Cadastre-se
+          <ThemedText style={styles.registerButtonText}>
+            Criar Nova Conta
           </ThemedText>
         </TouchableOpacity>
       </ThemedView>
@@ -206,6 +275,22 @@ const styles = StyleSheet.create({
     color: "#FF453A",
     marginBottom: 16,
   },
+  errorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: Colors.light.tint,
+    borderRadius: 12,
+    padding: 16,
+    marginLeft: 16,
+  },
+  retryText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
   loginButton: {
     backgroundColor: Colors.light.tint,
     borderRadius: 12,
@@ -213,17 +298,57 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 16,
   },
+  loginButtonWithError: {
+    backgroundColor: "#FF453A",
+  },
   loginButtonText: {
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "600",
   },
-  registerLink: {
+  forgotPasswordContainer: {
     marginTop: 24,
     alignItems: "center",
   },
-  registerText: {
+  forgotPasswordText: {
     color: Colors.light.tint,
     fontSize: 16,
+  },
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 24,
+    marginBottom: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#8E8E93",
+  },
+  dividerText: {
+    color: "#8E8E93",
+    fontSize: 16,
+    marginHorizontal: 16,
+  },
+  registerButton: {
+    backgroundColor: "#2C2C2E", // Darker background for contrast
+    borderRadius: 12,
+    padding: 16,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.light.tint,
+  },
+  registerButtonText: {
+    color: Colors.light.tint,
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  registerLink: {
+    marginTop: 16,
+    alignItems: "center",
+  },
+  registerText: {
+    color: "#8E8E93",
+    fontSize: 14,
   },
 });

@@ -5,6 +5,7 @@ export interface User {
   cpf: string;
   email: string;
   avatarUrl?: string;
+  role?: number; // 1: normal user, 2: admin user
 }
 
 // Voting Pool types

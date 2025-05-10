@@ -1,3 +1,5 @@
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
 import {
@@ -6,12 +8,14 @@ import {
   FlatList,
   RefreshControl,
   StyleSheet,
+  TouchableOpacity,
   useColorScheme,
   View,
 } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { VotingPoolCard } from "../../components/VotingPoolCard";
 import { Colors } from "../../constants/Colors";
+import { useAuth } from "../../context/AuthContext";
 import { votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
 
@@ -21,6 +25,10 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const { user } = useAuth();
+
+  // Check if user is admin (role = 2)
+  const isAdmin = user?.role === 2;
 
   const fetchVotingPools = async () => {
     try {
@@ -47,6 +55,11 @@ export default function HomeScreen() {
   useEffect(() => {
     fetchVotingPools();
   }, []);
+
+  const handleCreatePool = () => {
+    // Navigate to the create pool page
+    router.push("/create-pool");
+  };
 
   const renderEmptyComponent = () => {
     if (isLoading) {
@@ -96,6 +109,16 @@ export default function HomeScreen() {
           />
         }
       />
+
+      {/* Admin-only FAB to create a new pool */}
+      {isAdmin && (
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: Colors.light.tint }]}
+          onPress={handleCreatePool}
+        >
+          <Ionicons name="add" size={30} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -125,5 +148,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
     opacity: 0.7,
+  },
+  fab: {
+    position: "absolute",
+    bottom: 20,
+    right: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
 });
