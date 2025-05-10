@@ -27,12 +27,50 @@ async function getToken(): Promise<string | null> {
 
 // Helper to set the token
 async function setToken(token: string): Promise<void> {
+  console.log("Storing token in SecureStore, length:", token.length);
   return await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token);
 }
 
 // Helper to remove the token
 async function removeToken(): Promise<void> {
+  console.log("Removing token from SecureStore");
   return await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+}
+
+// Helper to create authorized headers with the token
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const token = await getToken();
+
+  // Debug token retrieval
+  if (token) {
+    console.log("Retrieved token from SecureStore. Length:", token.length);
+    console.log("Token prefix:", token.substring(0, 10));
+  } else {
+    console.log("No token found in SecureStore");
+  }
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+
+  if (token) {
+    // Important: Make sure to format exactly as backend expects
+    headers["Authorization"] = `Bearer ${token}`;
+    console.log("Added Authorization header with Bearer token");
+  }
+
+  return headers;
+}
+
+// Helper to check if authorization header is present
+function hasAuthHeader(headers: HeadersInit): boolean {
+  if (headers instanceof Headers) {
+    return headers.has("Authorization");
+  } else if (Array.isArray(headers)) {
+    return headers.some((pair) => pair[0] === "Authorization");
+  } else {
+    return "Authorization" in headers;
+  }
 }
 
 // Helper to check if response is OK
@@ -61,6 +99,27 @@ function transformPoolData(apiPool: APIVotingPool): VotingPool {
         : undefined,
     })),
   };
+}
+
+// TEMPORARY debug function to force set a token for testing
+async function debugSetToken(token: string) {
+  console.log("DEBUG: Manually setting token with length:", token.length);
+
+  // First remove any existing token
+  await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+
+  // Then set the new token
+  await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token);
+
+  // Verify it was set
+  const check = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
+  console.log(
+    "DEBUG: Token set verification:",
+    !!check,
+    check ? check.substring(0, 10) : "None"
+  );
+
+  return !!check;
 }
 
 // Auth API functions
@@ -149,7 +208,11 @@ export const authApi = {
       // Ensure CPF is clean (digits only)
       const cleanedCpf = cpf.replace(/\D/g, "");
 
-      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      // Create a copy of the API base URL to ensure it's correct
+      const loginUrl = `${API_BASE_URL}/api/auth/login`;
+      console.log("Login URL:", loginUrl);
+
+      const response = await fetch(loginUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -157,18 +220,64 @@ export const authApi = {
         body: JSON.stringify({ cpf: cleanedCpf, password }),
       });
 
+      console.log("Login response status:", response.status);
+
+      // Log response headers
+      const headerMap: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headerMap[key] = value;
+      });
+      console.log("Response headers:", JSON.stringify(headerMap));
+
       if (!response.ok) {
         const errorData = await response.json();
         console.error("Login error response:", errorData);
         throw new Error(errorData.message || "Login failed");
       }
 
-      const data = await response.json();
+      // Get the raw response text first to debug
+      const responseText = await response.clone().text();
+      console.log(
+        "Raw login response:",
+        responseText.substring(0, 100) + "..."
+      );
 
-      // Store the token
+      // Then parse as JSON
+      const data = await response.json();
+      console.log(
+        "Login successful, token received. Token length:",
+        data.token?.length || 0
+      );
+
+      // Log first few chars to ensure we have a proper JWT (starts with ey...)
+      if (data.token) {
+        console.log("Token prefix:", data.token.substring(0, 10));
+      }
+
+      if (!data.token) {
+        console.error("No token received in login response!");
+        throw new Error("No authentication token received");
+      }
+
+      // Try the new debug token storage method
+      const success = await debugSetToken(data.token);
+      console.log("DEBUG token set success:", success);
+
+      // Also store using original method as backup
       await setToken(data.token);
 
-      console.log("Login successful");
+      // Verify the token was stored
+      const storedToken = await getToken();
+      console.log("Token stored successfully:", !!storedToken);
+      // Check if stored token matches original token
+      if (storedToken) {
+        console.log(
+          "Stored token matches original:",
+          storedToken.length === data.token.length &&
+            storedToken.substring(0, 10) === data.token.substring(0, 10)
+        );
+      }
+
       return { user: data.user, token: data.token };
     } catch (error) {
       console.error("Login error in API client:", error);
@@ -176,45 +285,28 @@ export const authApi = {
     }
   },
 
-  // Log out the current user
-  async logout(): Promise<void> {
-    const token = await getToken();
-
-    if (token) {
-      try {
-        await fetch(`${API_BASE_URL}/api/auth/logout`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      } catch (error) {
-        console.error("Logout error:", error);
-      } finally {
-        // Remove the token regardless of API response
-        await removeToken();
-      }
-    }
-  },
-
   // Get the current user's data
   async getCurrentUser(): Promise<User | null> {
-    const token = await getToken();
-
-    if (!token) {
-      return null;
-    }
-
     try {
+      const token = await getToken();
+
+      if (!token) {
+        console.log("getCurrentUser: No token available");
+        return null;
+      }
+
+      console.log("getCurrentUser: Fetching user data with token");
+      const headers = await getAuthHeaders();
+
       const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
       });
 
       if (!response.ok) {
+        console.error("getCurrentUser: Error response", response.status);
         if (response.status === 401) {
           // Token expired or invalid
+          console.log("getCurrentUser: Token invalid, removing");
           await removeToken();
           return null;
         }
@@ -222,6 +314,7 @@ export const authApi = {
       }
 
       const data = await response.json();
+      console.log("getCurrentUser: Successfully retrieved user data");
       return data.user;
     } catch (error) {
       console.error("Get current user error:", error);
@@ -245,15 +338,41 @@ export const authApi = {
     const formData = new FormData();
     formData.append("avatar", avatarFile);
 
+    const headers = await getAuthHeaders();
+    // Don't set Content-Type for multipart/form-data
+
     const response = await fetch(`${API_BASE_URL}/api/auth/avatar`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
       body: formData,
     });
 
-    await handleResponse<{ message: string }>(response);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to update avatar");
+    }
+
+    return;
+  },
+
+  // Log out the current user
+  async logout(): Promise<void> {
+    const token = await getToken();
+
+    if (token) {
+      try {
+        const headers = await getAuthHeaders();
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: "POST",
+          headers,
+        });
+      } catch (error) {
+        console.error("Logout error:", error);
+      } finally {
+        // Remove the token regardless of API response
+        await removeToken();
+      }
+    }
   },
 };
 
@@ -372,19 +491,23 @@ export const votingPoolsApi = {
       });
     }
 
+    // Get auth headers without Content-Type (will be set by FormData)
+    const headers = await getAuthHeaders();
+    console.log("Creating voting pool with auth token");
+
     const response = await fetch(`${API_BASE_URL}/api/voting-pools`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
       body: formData,
     });
 
-    const data = await handleResponse<{
-      message: string;
-      votingPool: APIVotingPool;
-    }>(response);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to create voting pool");
+    }
 
+    const data = await response.json();
+    console.log("Voting pool created successfully");
     return transformPoolData(data.votingPool);
   },
 };
@@ -399,20 +522,24 @@ export const votesApi = {
       throw new Error("Authentication required");
     }
 
+    // Get auth headers and add content type for JSON
+    const headers = (await getAuthHeaders()) as Record<string, string>;
+    headers["Content-Type"] = "application/json";
+
+    console.log("Submitting vote with token for pool:", poolId);
     const response = await fetch(`${API_BASE_URL}/api/votes`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({ poolId, optionId }),
     });
 
-    const data = await handleResponse<{
-      message: string;
-      vote: Vote;
-    }>(response);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to submit vote");
+    }
 
+    const data = await response.json();
+    console.log("Vote submitted successfully");
     return data.vote;
   },
 
@@ -421,24 +548,34 @@ export const votesApi = {
     const token = await getToken();
 
     if (!token) {
+      console.log("No token available for getUserVotes");
       return [];
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/votes/user`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    try {
+      const headers = await getAuthHeaders();
+      console.log("Fetching user votes with token");
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        await removeToken();
-        return [];
+      const response = await fetch(`${API_BASE_URL}/api/votes/user`, {
+        headers,
+      });
+
+      if (!response.ok) {
+        console.error("Error fetching user votes:", response.status);
+        if (response.status === 401) {
+          await removeToken();
+          return [];
+        }
+        throw new Error("Failed to get user votes");
       }
-      throw new Error("Failed to get user votes");
-    }
 
-    return await response.json();
+      const data = await response.json();
+      console.log(`Retrieved ${data.length} user votes`);
+      return data;
+    } catch (error) {
+      console.error("getUserVotes error:", error);
+      return [];
+    }
   },
 
   // Check if the current user has voted in a pool
@@ -452,12 +589,12 @@ export const votesApi = {
     }
 
     try {
+      const headers = await getAuthHeaders();
+
       const response = await fetch(
         `${API_BASE_URL}/api/votes/user/pools/${poolId}`,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers,
         }
       );
 
@@ -513,23 +650,85 @@ export const resultsApi = {
       }[];
     }[]
   > {
-    const token = await getToken();
+    try {
+      console.log(
+        "Fetching results with token:",
+        (await getToken()) ? "Present" : "Missing"
+      );
 
-    if (!token) {
-      throw new Error("Authentication required");
-    }
+      const token = await getToken();
+      if (!token) {
+        console.log("No authentication token found for results");
+        return []; // Return empty array instead of throwing error
+      }
 
-    let url = `${API_BASE_URL}/api/results/pools`;
-    if (status) {
-      url += `?status=${status}`;
-    }
+      let url = `${API_BASE_URL}/api/results/pools`;
+      if (status) {
+        url += `?status=${status}`;
+      }
 
-    const response = await fetch(url, {
-      headers: {
+      console.log("Fetching results from URL:", url);
+
+      // Create headers manually for more control
+      const headers: Record<string, string> = {
+        Accept: "application/json",
         Authorization: `Bearer ${token}`,
-      },
-    });
+      };
 
-    return await handleResponse(response);
+      console.log(
+        "Auth header value:",
+        headers.Authorization.substring(0, 15) + "..."
+      );
+
+      const response = await fetch(url, {
+        headers,
+      });
+
+      if (!response.ok) {
+        console.error("Results API error:", response.status);
+
+        // Log the request headers that were sent
+        console.log("Request headers sent:", JSON.stringify(headers));
+
+        // Get specific error message from response
+        const errorText = await response.text();
+        console.error("Error response:", errorText);
+
+        // If unauthorized, try one more fetch with a logged token
+        if (response.status === 401) {
+          console.log("Unauthorized. Token value length:", token.length);
+          console.log("Token starts with:", token.substring(0, 15));
+
+          // Try with a new token fetch
+          console.log("Getting fresh token");
+          const freshToken = await getToken();
+          if (freshToken && freshToken !== token) {
+            console.log("Got different token, retrying");
+            headers.Authorization = `Bearer ${freshToken}`;
+
+            // Try once more
+            const retryResponse = await fetch(url, { headers });
+            if (retryResponse.ok) {
+              const retryData = await retryResponse.json();
+              console.log(
+                `Retry succeeded! Received ${retryData.length} results`
+              );
+              return retryData;
+            } else {
+              console.error("Retry also failed:", await retryResponse.text());
+            }
+          }
+        }
+
+        return [];
+      }
+
+      const data = await response.json();
+      console.log(`Received ${data.length} results from API`);
+      return data;
+    } catch (error) {
+      console.error("Results API exception:", error);
+      return [];
+    }
   },
 };

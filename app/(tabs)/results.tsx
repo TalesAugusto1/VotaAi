@@ -44,31 +44,63 @@ export default function ResultsScreen() {
 
     try {
       setIsLoading(true);
+      console.log("Fetching voted pools for status:", activeTab);
 
       // Get user voted pools results
       const poolResults = await resultsApi.getUserVotedPoolsResults(activeTab);
+      console.log("Received pool results:", poolResults?.length || 0);
 
-      // Transform results to match app data structure
-      const poolPromises = poolResults.map(async (result: PoolResult) => {
-        try {
-          const pool = await votingPoolsApi.getVotingPoolById(result.poolId);
-          return pool;
-        } catch (error) {
-          console.error(`Error fetching pool ${result.poolId}:`, error);
-          return null;
-        }
-      });
+      if (!poolResults || poolResults.length === 0) {
+        setVotedPools([]);
+        return;
+      }
 
-      const pools = await Promise.all(poolPromises);
+      // Now get the complete pool data for each result
+      const poolIds = poolResults.map((result) => result.poolId);
+      console.log("Pool IDs to fetch:", poolIds);
 
-      // Filter out null values
-      setVotedPools(pools.filter((pool): pool is VotingPool => pool !== null));
+      try {
+        const poolsData = await Promise.all(
+          poolIds.map((id) => votingPoolsApi.getVotingPoolById(id))
+        );
+
+        // Filter out null values
+        const validPools = poolsData.filter(
+          (pool): pool is VotingPool => pool !== null
+        );
+        console.log(
+          `Successfully fetched ${validPools.length} out of ${poolIds.length} pools`
+        );
+        setVotedPools(validPools);
+      } catch (poolFetchError) {
+        console.error("Error fetching individual pools:", poolFetchError);
+        // Try to use the basic pool data from results
+        const fallbackPools = poolResults.map((result) => ({
+          id: result.poolId,
+          title: result.title,
+          status: result.status,
+          description: "Dados completos indisponíveis",
+          category: "Geral",
+          startDate: new Date(),
+          endDate: new Date(),
+          anonymous: false,
+          options: result.results.map((r) => ({
+            id: r.id,
+            text: r.text,
+            voteCount: r.voteCount,
+            description: "",
+          })),
+        })) as unknown as VotingPool[];
+
+        setVotedPools(fallbackPools);
+      }
     } catch (error) {
       console.error("Error fetching voted pools:", error);
       Alert.alert(
         "Erro",
         "Falha ao carregar os resultados. Tente novamente mais tarde."
       );
+      setVotedPools([]);
     } finally {
       setIsLoading(false);
     }
