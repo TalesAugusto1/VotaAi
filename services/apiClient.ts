@@ -596,6 +596,27 @@ export const votingPoolsApi = {
     console.log("Voting pool created successfully");
     return transformPoolData(data.votingPool);
   },
+
+  // Delete a voting pool
+  async deleteVotingPool(id: string): Promise<boolean> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE_URL}/api/voting-pools/${id}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to delete voting pool");
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Error deleting voting pool:", error);
+      throw error;
+    }
+  },
 };
 
 // Votes API functions

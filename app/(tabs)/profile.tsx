@@ -21,6 +21,8 @@ import {
   votingPoolsApi,
 } from "../../services/apiClient";
 import { Vote } from "../../types";
+import { CustomModal } from "../../components/CustomModal";
+import { useModal } from "../../hooks/useModal";
 
 interface UserVote extends Vote {
   pool?: {
@@ -33,6 +35,7 @@ export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const { visible, options, showModal, hideModal } = useModal();
   const [voteStats, setVoteStats] = useState({
     totalVotes: 0,
     activeVotes: 0,
@@ -122,22 +125,26 @@ export default function ProfileScreen() {
   const handleLogout = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    Alert.alert(
-      "Sair",
-      "Tem certeza que deseja sair?",
-      [
+    showModal({
+      title: "Sair",
+      message: "Tem certeza que deseja sair?",
+      type: "warning",
+      actions: [
         {
           text: "Cancelar",
+          onPress: () => hideModal(),
           style: "cancel",
         },
         {
           text: "Sair",
-          onPress: () => logout(),
+          onPress: () => {
+            hideModal();
+            logout();
+          },
           style: "destructive",
         },
       ],
-      { cancelable: true }
-    );
+    });
   };
 
   if (!user) {
@@ -317,6 +324,15 @@ export default function ProfileScreen() {
         <Ionicons name="log-out" size={20} color="#FF3B30" />
         <ThemedText style={styles.logoutText}>Sair da Conta</ThemedText>
       </TouchableOpacity>
+
+      <CustomModal
+        visible={visible}
+        title={options.title || ""}
+        message={options.message}
+        type={options.type}
+        onClose={hideModal}
+        actions={options.actions}
+      />
     </ScrollView>
   );
 }

@@ -16,6 +16,8 @@ import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
 import { resultsApi, votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
+import { CustomModal } from "../../components/CustomModal";
+import { useModal } from "../../hooks/useModal";
 
 interface PoolResult {
   poolId: string;
@@ -38,6 +40,7 @@ export default function ResultsScreen() {
   const { user } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const { visible, options, showModal, hideModal } = useModal();
 
   const fetchVotedPools = async () => {
     if (!user) return;
@@ -71,7 +74,14 @@ export default function ResultsScreen() {
         console.log(
           `Successfully fetched ${validPools.length} out of ${poolIds.length} pools`
         );
-        setVotedPools(validPools);
+
+        // Sort the options within each pool by vote count
+        const sortedPools = validPools.map((pool) => ({
+          ...pool,
+          options: [...pool.options].sort((a, b) => b.voteCount - a.voteCount),
+        }));
+
+        setVotedPools(sortedPools);
       } catch (poolFetchError) {
         console.error("Error fetching individual pools:", poolFetchError);
         // Try to use the basic pool data from results
@@ -84,22 +94,25 @@ export default function ResultsScreen() {
           startDate: new Date(),
           endDate: new Date(),
           anonymous: false,
-          options: result.results.map((r) => ({
-            id: r.id,
-            text: r.text,
-            voteCount: r.voteCount,
-            description: "",
-          })),
+          options: result.results
+            .sort((a, b) => b.voteCount - a.voteCount)
+            .map((r) => ({
+              id: r.id,
+              text: r.text,
+              voteCount: r.voteCount,
+              description: "",
+            })),
         })) as unknown as VotingPool[];
 
         setVotedPools(fallbackPools);
       }
     } catch (error) {
       console.error("Error fetching voted pools:", error);
-      Alert.alert(
-        "Erro",
-        "Falha ao carregar os resultados. Tente novamente mais tarde."
-      );
+      showModal({
+        title: "Erro",
+        message: "Falha ao carregar os resultados. Tente novamente mais tarde.",
+        type: "error",
+      });
       setVotedPools([]);
     } finally {
       setIsLoading(false);
@@ -115,19 +128,6 @@ export default function ResultsScreen() {
   useEffect(() => {
     fetchVotedPools();
   }, [user, activeTab]);
-
-  // Sort the pools options by vote count in each pool
-  useEffect(() => {
-    if (votedPools.length > 0) {
-      const sortedPools = votedPools.map((pool) => {
-        return {
-          ...pool,
-          options: [...pool.options].sort((a, b) => b.voteCount - a.voteCount),
-        };
-      });
-      setVotedPools(sortedPools);
-    }
-  }, [votedPools.length]);
 
   const renderEmptyComponent = () => {
     if (isLoading) {
@@ -217,6 +217,16 @@ export default function ResultsScreen() {
             tintColor={isDark ? Colors.dark.tint : Colors.light.tint}
           />
         }
+      />
+
+      {/* Custom Modal */}
+      <CustomModal
+        visible={visible}
+        title={options.title || ""}
+        message={options.message}
+        type={options.type}
+        onClose={hideModal}
+        actions={options.actions}
       />
     </View>
   );
