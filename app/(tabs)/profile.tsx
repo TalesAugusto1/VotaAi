@@ -14,8 +14,20 @@ import {
 import { ThemedText } from "../../components/ThemedText";
 import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
-import { votesService, votingPoolsService } from "../../services/api";
-import { Vote, VotingPool } from "../../types";
+import {
+  authApi,
+  resultsApi,
+  votesApi,
+  votingPoolsApi,
+} from "../../services/apiClient";
+import { Vote } from "../../types";
+
+interface UserVote extends Vote {
+  pool?: {
+    title: string;
+    status: "active" | "closed";
+  };
+}
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -26,9 +38,7 @@ export default function ProfileScreen() {
     activeVotes: 0,
     closedVotes: 0,
   });
-  const [recentVotes, setRecentVotes] = useState<
-    (Vote & { pool?: VotingPool })[]
-  >([]);
+  const [recentVotes, setRecentVotes] = useState<UserVote[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -38,50 +48,69 @@ export default function ProfileScreen() {
       try {
         setIsLoading(true);
 
-        // Get user votes
-        const userVotes = await votesService.getUserVotes(user.id);
+        // Get all user votes
+        const userVotes = await votesApi.getUserVotes();
 
-        // Get all pools
-        const allPools = await votingPoolsService.getVotingPools();
-
-        // Calculate stats
-        const userVotedPools = allPools.filter((pool) =>
-          userVotes.some((vote) => vote.poolId === pool.id)
+        // Get active and closed pools
+        const activeResults = await resultsApi.getUserVotedPoolsResults(
+          "active"
+        );
+        const closedResults = await resultsApi.getUserVotedPoolsResults(
+          "closed"
         );
 
-        const activeVotes = userVotedPools.filter(
-          (pool) => pool.status === "active"
-        ).length;
-        const closedVotes = userVotedPools.filter(
-          (pool) => pool.status === "closed"
-        ).length;
-
+        // Calculate stats
         setVoteStats({
           totalVotes: userVotes.length,
-          activeVotes,
-          closedVotes,
+          activeVotes: activeResults.length,
+          closedVotes: closedResults.length,
         });
 
         // Get recent votes with pool info
-        const votesWithPoolInfo = userVotes.map((vote) => {
-          const pool = allPools.find((p) => p.id === vote.poolId);
-          return {
-            ...vote,
-            pool,
-          };
-        });
+        if (userVotes.length > 0) {
+          // Sort by most recent and limit to 3
+          const sortedVotes = userVotes
+            .sort(
+              (a, b) =>
+                new Date(b.timestamp).getTime() -
+                new Date(a.timestamp).getTime()
+            )
+            .slice(0, 3);
 
-        // Sort by most recent and limit to 3
-        const sortedVotes = votesWithPoolInfo
-          .sort(
-            (a, b) =>
-              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          )
-          .slice(0, 3);
+          // Fetch pool details for each vote
+          const votesWithPools = await Promise.all(
+            sortedVotes.map(async (vote) => {
+              try {
+                const pool = await votingPoolsApi.getVotingPoolById(
+                  vote.poolId
+                );
+                return {
+                  ...vote,
+                  pool: pool
+                    ? {
+                        title: pool.title,
+                        status: pool.status as "active" | "closed",
+                      }
+                    : undefined,
+                };
+              } catch (error) {
+                console.error(
+                  `Error fetching pool for vote ${vote.id}:`,
+                  error
+                );
+                return vote;
+              }
+            })
+          );
 
-        setRecentVotes(sortedVotes);
+          setRecentVotes(votesWithPools);
+        }
       } catch (error) {
         console.error("Error fetching user vote stats:", error);
+        Alert.alert(
+          "Erro",
+          "Falha ao carregar dados de votação. Tente novamente mais tarde."
+        );
       } finally {
         setIsLoading(false);
       }
@@ -132,7 +161,7 @@ export default function ProfileScreen() {
       <View style={styles.profileHeader}>
         {user.avatarUrl ? (
           <Image
-            source={{ uri: user.avatarUrl }}
+            source={{ uri: authApi.getAvatarUrl(user.id) }}
             style={styles.avatar}
             contentFit="cover"
           />

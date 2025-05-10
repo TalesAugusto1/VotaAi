@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -15,8 +16,10 @@ import {
 import { ThemedText } from "../../components/ThemedText";
 import { ThemedView } from "../../components/ThemedView";
 import { Colors } from "../../constants/Colors";
+import { useAuth } from "../../context/AuthContext";
 
 export default function RegisterScreen() {
+  const { register, isLoading, error: authError } = useAuth();
   const [name, setName] = useState("");
   const [cpf, setCpf] = useState("");
   const [email, setEmail] = useState("");
@@ -50,38 +53,74 @@ export default function RegisterScreen() {
     return formatted;
   };
 
-  const handleRegister = () => {
+  // Set error from auth context if available
+  React.useEffect(() => {
+    if (authError) {
+      setError(authError);
+    }
+  }, [authError]);
+
+  const handleRegister = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    console.log("Starting registration process");
 
-    // Basic validation
-    if (!name.trim()) {
-      setError("Nome é obrigatório");
+    // Clear previous errors
+    setError("");
+
+    // Validate name - minimum 3 characters
+    if (!name.trim() || name.length < 3) {
+      setError("Nome deve ter pelo menos 3 caracteres");
+      console.log("Validation failed: Name must be at least 3 characters");
       return;
     }
 
-    if (cpf.replace(/\D/g, "").length !== 11) {
-      setError("CPF inválido");
+    // CPF validation - must be exactly 11 digits without any special characters
+    const cleanedCpf = cpf.replace(/\D/g, "");
+    if (cleanedCpf.length !== 11) {
+      setError("CPF inválido - deve conter exatamente 11 dígitos");
+      console.log("Validation failed: CPF must be exactly 11 digits");
       return;
     }
 
+    // Email validation - must be valid format
     if (!/^\S+@\S+\.\S+$/.test(email)) {
-      setError("Email inválido");
+      setError("Formato de email inválido");
+      console.log("Validation failed: Invalid email format");
       return;
     }
 
-    if (password.length < 6) {
-      setError("Senha deve ter pelo menos 6 caracteres");
+    // Password validation - minimum 8 characters
+    if (password.length < 8) {
+      setError("Senha deve ter pelo menos 8 caracteres");
+      console.log("Validation failed: Password must be at least 8 characters");
       return;
     }
 
+    // Password matching
     if (password !== confirmPassword) {
       setError("As senhas não coincidem");
+      console.log("Validation failed: Passwords don't match");
       return;
     }
 
-    // In a real app, you would register the user with your backend here
-    // For now, we'll just navigate to the login screen
-    router.replace("/(auth)/login");
+    console.log("All client-side validation passed");
+
+    try {
+      // Register user with API
+      console.log("Submitting registration to API");
+      await register({
+        name,
+        cpf: cleanedCpf, // Send cleaned CPF
+        email,
+        password,
+      });
+
+      console.log("Registration API call completed");
+      // The AuthContext will handle the redirect after successful registration
+    } catch (error) {
+      console.error("Registration error in component:", error);
+      // Error will be handled by the auth context
+    }
   };
 
   return (
@@ -173,8 +212,15 @@ export default function RegisterScreen() {
           <TouchableOpacity
             style={styles.registerButton}
             onPress={handleRegister}
+            disabled={isLoading}
           >
-            <ThemedText style={styles.registerButtonText}>Cadastrar</ThemedText>
+            {isLoading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <ThemedText style={styles.registerButtonText}>
+                Cadastrar
+              </ThemedText>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity

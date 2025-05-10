@@ -17,7 +17,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { VotingOptionCard } from "../../components/VotingOptionCard";
 import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
-import { votesService, votingPoolsService } from "../../services/api";
+import { votesApi, votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
 import { formatDate, isVotingPoolActive } from "../../utils/helpers";
 
@@ -41,13 +41,13 @@ export default function VotingPoolDetailScreen() {
 
   useEffect(() => {
     const fetchVotingPool = async () => {
-      if (!id || typeof id !== "string" || !user) return;
+      if (!id || typeof id !== "string") return;
 
       try {
         setIsLoading(true);
 
         // Fetch voting pool details
-        const pool = await votingPoolsService.getVotingPoolById(id);
+        const pool = await votingPoolsApi.getVotingPoolById(id);
 
         if (!pool) {
           Alert.alert("Erro", "Votação não encontrada");
@@ -57,17 +57,13 @@ export default function VotingPoolDetailScreen() {
 
         setVotingPool(pool);
 
-        // Check if user has already voted in this pool
-        const voted = await votesService.hasUserVoted(user.id, pool.id);
-        setHasVoted(voted);
+        if (user) {
+          // Check if user has already voted in this pool
+          const { hasVoted, optionId } = await votesApi.hasUserVoted(pool.id);
+          setHasVoted(hasVoted);
 
-        if (voted) {
-          // Get user's vote to highlight their choice
-          const userVotes = await votesService.getUserVotes(user.id);
-          const userVote = userVotes.find((vote) => vote.poolId === pool.id);
-
-          if (userVote) {
-            setUserVoteOptionId(userVote.optionId);
+          if (hasVoted && optionId) {
+            setUserVoteOptionId(optionId);
           }
         }
       } catch (error) {
@@ -87,14 +83,17 @@ export default function VotingPoolDetailScreen() {
   };
 
   const handleSubmitVote = async () => {
-    if (!selectedOption || !votingPool || !user) return;
+    if (!selectedOption || !votingPool || !user) {
+      Alert.alert("Erro", "Você precisa estar logado para votar");
+      return;
+    }
 
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsSubmitting(true);
 
       // Submit vote
-      await votesService.submitVote(user.id, votingPool.id, selectedOption);
+      await votesApi.submitVote(votingPool.id, selectedOption);
 
       // Update UI
       setHasVoted(true);
@@ -104,9 +103,7 @@ export default function VotingPoolDetailScreen() {
       Alert.alert("Sucesso", "Seu voto foi registrado com sucesso!");
 
       // Refresh voting pool data to get updated vote counts
-      const updatedPool = await votingPoolsService.getVotingPoolById(
-        votingPool.id
-      );
+      const updatedPool = await votingPoolsApi.getVotingPoolById(votingPool.id);
       if (updatedPool) {
         setVotingPool(updatedPool);
       }

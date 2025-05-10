@@ -2,6 +2,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -11,7 +12,7 @@ import {
 import { ThemedText } from "../../components/ThemedText";
 import { VotingPoolCard } from "../../components/VotingPoolCard";
 import { Colors } from "../../constants/Colors";
-import { votingPoolsService } from "../../services/api";
+import { votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
 
 export default function HomeScreen() {
@@ -24,10 +25,14 @@ export default function HomeScreen() {
   const fetchVotingPools = async () => {
     try {
       setIsLoading(true);
-      const pools = await votingPoolsService.getActiveVotingPools();
+      const pools = await votingPoolsApi.getActiveVotingPools();
       setVotingPools(pools);
     } catch (error) {
       console.error("Error fetching voting pools:", error);
+      Alert.alert(
+        "Erro",
+        "Falha ao carregar as votações. Tente novamente mais tarde."
+      );
     } finally {
       setIsLoading(false);
     }

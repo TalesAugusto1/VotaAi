@@ -34,25 +34,25 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
         return {
           text: "Ativa",
           color: "#4CAF50",
-          icon: "check-circle",
+          icon: "check-circle" as const,
         };
       case "upcoming":
         return {
           text: "Em breve",
           color: "#FFC107",
-          icon: "schedule",
+          icon: "schedule" as const,
         };
       case "closed":
         return {
           text: "Encerrada",
           color: "#F44336",
-          icon: "cancel",
+          icon: "cancel" as const,
         };
       default:
         return {
           text: "Desconhecido",
           color: "#9E9E9E",
-          icon: "help",
+          icon: "help" as const,
         };
     }
   };

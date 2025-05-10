@@ -2,6 +2,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -13,8 +14,21 @@ import { ThemedText } from "../../components/ThemedText";
 import { VotingPoolCard } from "../../components/VotingPoolCard";
 import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
-import { votesService, votingPoolsService } from "../../services/api";
+import { resultsApi, votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
+
+interface PoolResult {
+  poolId: string;
+  title: string;
+  status: "active" | "closed";
+  totalVotes: number;
+  results: {
+    id: string;
+    text: string;
+    voteCount: number;
+    percentage: number;
+  }[];
+}
 
 export default function ResultsScreen() {
   const [votedPools, setVotedPools] = useState<VotingPool[]>([]);
@@ -31,27 +45,30 @@ export default function ResultsScreen() {
     try {
       setIsLoading(true);
 
-      // Get user votes
-      const userVotes = await votesService.getUserVotes(user.id);
+      // Get user voted pools results
+      const poolResults = await resultsApi.getUserVotedPoolsResults(activeTab);
 
-      // Get all pools
-      const allPools = await votingPoolsService.getVotingPools();
+      // Transform results to match app data structure
+      const poolPromises = poolResults.map(async (result: PoolResult) => {
+        try {
+          const pool = await votingPoolsApi.getVotingPoolById(result.poolId);
+          return pool;
+        } catch (error) {
+          console.error(`Error fetching pool ${result.poolId}:`, error);
+          return null;
+        }
+      });
 
-      // Filter pools that user has voted on
-      const userVotedPools = allPools.filter((pool) =>
-        userVotes.some((vote) => vote.poolId === pool.id)
-      );
+      const pools = await Promise.all(poolPromises);
 
-      // Filter based on active tab
-      const filteredPools = userVotedPools.filter((pool) =>
-        activeTab === "active"
-          ? pool.status === "active"
-          : pool.status === "closed"
-      );
-
-      setVotedPools(filteredPools);
+      // Filter out null values
+      setVotedPools(pools.filter((pool): pool is VotingPool => pool !== null));
     } catch (error) {
       console.error("Error fetching voted pools:", error);
+      Alert.alert(
+        "Erro",
+        "Falha ao carregar os resultados. Tente novamente mais tarde."
+      );
     } finally {
       setIsLoading(false);
     }

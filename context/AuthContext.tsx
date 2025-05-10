@@ -1,6 +1,5 @@
-import * as SecureStore from "expo-secure-store";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { authService } from "../services/api";
+import { authApi } from "../services/apiClient";
 import { User } from "../types";
 
 interface AuthState {
@@ -9,17 +8,23 @@ interface AuthState {
   error: string | null;
 }
 
+// Define a more appropriate registration data type
+interface RegistrationData {
+  name: string;
+  cpf: string;
+  email: string;
+  password: string;
+  avatarUrl?: string;
+}
+
 interface AuthContextData extends AuthState {
   login: (cpf: string, password: string) => Promise<void>;
-  register: (userData: Omit<User, "id">) => Promise<void>;
+  register: (userData: RegistrationData) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 // Create the context
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
-
-// Storage key for user data
-const USER_STORAGE_KEY = "VotaAi_user";
 
 // Auth Provider component
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -29,27 +34,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     error: null,
   });
 
-  // Load user from storage on mount
+  // Load user from API on mount
   useEffect(() => {
-    async function loadStoredUser() {
+    async function loadUser() {
       try {
-        const storedUser = await SecureStore.getItemAsync(USER_STORAGE_KEY);
+        const user = await authApi.getCurrentUser();
 
-        if (storedUser) {
-          setState({
-            user: JSON.parse(storedUser),
-            isLoading: false,
-            error: null,
-          });
-        } else {
-          setState({
-            user: null,
-            isLoading: false,
-            error: null,
-          });
-        }
+        setState({
+          user,
+          isLoading: false,
+          error: null,
+        });
       } catch (error) {
-        console.error("Error loading stored user:", error);
+        console.error("Error loading user:", error);
         setState({
           user: null,
           isLoading: false,
@@ -58,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    loadStoredUser();
+    loadUser();
   }, []);
 
   // Login function
@@ -66,55 +63,87 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setState({ ...state, isLoading: true, error: null });
 
-      const user = await authService.login(cpf, password);
+      const { user } = await authApi.login(cpf, password);
 
-      if (user) {
-        // Store user in secure storage
-        await SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(user));
-
-        setState({
-          user,
-          isLoading: false,
-          error: null,
-        });
-      } else {
-        setState({
-          user: null,
-          isLoading: false,
-          error: "Credenciais inválidas",
-        });
-      }
+      setState({
+        user,
+        isLoading: false,
+        error: null,
+      });
     } catch (error) {
       console.error("Login error:", error);
       setState({
         user: null,
         isLoading: false,
-        error: "Falha ao fazer login. Tente novamente.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Falha ao fazer login. Tente novamente.",
       });
     }
   };
 
   // Register function
-  const register = async (userData: Omit<User, "id">) => {
+  const register = async (userData: RegistrationData) => {
     try {
+      console.log("AuthContext: Starting registration process");
       setState({ ...state, isLoading: true, error: null });
 
-      const newUser = await authService.register(userData);
+      // Log sanitized data (for debugging)
+      console.log("AuthContext: Registering with data:", {
+        name: userData.name,
+        cpfLength: userData.cpf.length,
+        email: userData.email,
+        passwordLength: userData.password.length,
+      });
 
-      // Store user in secure storage
-      await SecureStore.setItemAsync(USER_STORAGE_KEY, JSON.stringify(newUser));
+      const { user } = await authApi.register(userData);
+      console.log(
+        "AuthContext: Registration successful, user created:",
+        user.id
+      );
 
       setState({
-        user: newUser,
+        user,
         isLoading: false,
         error: null,
       });
     } catch (error) {
-      console.error("Registration error:", error);
+      console.error("AuthContext: Registration error:", error);
+
+      // Check if error is a validation error with details
+      let errorMessage = "Falha ao registrar. Tente novamente.";
+
+      if (error instanceof Error) {
+        errorMessage = error.message;
+
+        // Handle common error cases
+        if (
+          errorMessage.includes("CPF already") ||
+          errorMessage.includes("Email already")
+        ) {
+          errorMessage = errorMessage.includes("CPF")
+            ? "CPF já cadastrado no sistema"
+            : "Email já cadastrado no sistema";
+        } else if (errorMessage.includes("Validation error")) {
+          errorMessage = "Erro de validação. Verifique todos os campos.";
+
+          // Log detailed debug info
+          console.log("AuthContext: Data that failed validation:", {
+            nameLength: userData.name.length,
+            cpfLength: userData.cpf.length,
+            cpfDigitsOnly: userData.cpf.match(/^\d+$/) ? "Yes" : "No",
+            emailValid: /^\S+@\S+\.\S+$/.test(userData.email),
+            passwordLength: userData.password.length,
+          });
+        }
+      }
+
+      console.log("AuthContext: Setting error state:", errorMessage);
       setState({
         user: null,
         isLoading: false,
-        error: "Falha ao registrar. Tente novamente.",
+        error: errorMessage,
       });
     }
   };
@@ -122,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Logout function
   const logout = async () => {
     try {
-      await SecureStore.deleteItemAsync(USER_STORAGE_KEY);
+      await authApi.logout();
 
       setState({
         user: null,

@@ -52,20 +52,26 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
+    // Clear previous errors
+    setError("");
+
     // Basic validation
-    if (cpf.replace(/\D/g, "").length !== 11) {
-      setError("CPF inválido");
+    const cleanedCpf = cpf.replace(/\D/g, "");
+    if (cleanedCpf.length !== 11) {
+      setError("CPF inválido - deve conter 11 dígitos");
       return;
     }
 
-    if (password.length < 6) {
-      setError("Senha deve ter pelo menos 6 caracteres");
+    if (password.length < 8) {
+      // Changed from 6 to 8 to match registration requirements
+      setError("Senha deve ter pelo menos 8 caracteres");
       return;
     }
 
     try {
-      // Call the login function from AuthContext
-      await login(cpf, password);
+      console.log("Attempting login with cleaned CPF");
+      // Call the login function from AuthContext with cleaned CPF
+      await login(cleanedCpf, password);
 
       // The AuthContext will handle the redirect after successful login
     } catch (err) {
