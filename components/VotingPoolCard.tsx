@@ -1,7 +1,7 @@
 import { FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
 import {
   StyleSheet,
   TouchableOpacity,
@@ -20,6 +20,16 @@ interface VotingPoolCardProps {
 export function VotingPoolCard({ pool }: VotingPoolCardProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+
+  // Log image data for debugging
+  useEffect(() => {
+    console.log(`Pool ${pool.id} - Has image data: ${!!pool.imageData}`);
+    if (pool.imageData) {
+      console.log(
+        `Pool ${pool.id} - Image data length: ${pool.imageData.length}`
+      );
+    }
+  }, [pool]);
 
   // Calculate total votes
   const totalVotes = pool.options.reduce(
@@ -75,9 +85,9 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
       onPress={handlePress}
       activeOpacity={0.7}
     >
-      {pool.imageUrl ? (
+      {pool.imageData ? (
         <Image
-          source={{ uri: pool.imageUrl }}
+          source={{ uri: pool.imageData }}
           style={styles.image}
           contentFit="cover"
           transition={300}

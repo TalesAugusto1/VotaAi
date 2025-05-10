@@ -1,6 +1,6 @@
 import { FontAwesome5 } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import React from "react";
+import React, { useEffect } from "react";
 import {
   StyleSheet,
   TouchableOpacity,
@@ -32,6 +32,16 @@ export function VotingOptionCard({
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
+  // Log option image data for debugging
+  useEffect(() => {
+    console.log(`Option ${option.id} - Has image data: ${!!option.imageData}`);
+    if (option.imageData) {
+      console.log(
+        `Option ${option.id} - Image data length: ${option.imageData.length}`
+      );
+    }
+  }, [option]);
+
   const percentage = calculatePercentage(option.voteCount, totalVotes);
 
   return (
@@ -47,9 +57,9 @@ export function VotingOptionCard({
       disabled={isVoted || showResults}
       activeOpacity={0.7}
     >
-      {option.imageUrl ? (
+      {option.imageData ? (
         <Image
-          source={{ uri: option.imageUrl }}
+          source={{ uri: option.imageData }}
           style={styles.image}
           contentFit="cover"
           transition={300}

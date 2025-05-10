@@ -14,7 +14,7 @@ export interface VotingPool {
   title: string;
   description: string;
   category: string;
-  imageUrl?: string;
+  imageData?: string; // Base64 encoded image data
   startDate: string; // ISO date string
   endDate: string; // ISO date string
   options: VotingOption[];
@@ -31,7 +31,7 @@ export interface VotingOption {
   id: string;
   text: string;
   description?: string;
-  imageUrl?: string;
+  imageData?: string; // Base64 encoded image data
   voteCount: number;
 }
 

@@ -5,6 +5,9 @@ import { User, Vote, VotingOption, VotingPool } from "../types";
 // API base URL
 const API_BASE_URL = "http://192.168.15.15:3000";
 
+// Log the API base URL for debugging
+console.log("API client initialized with base URL:", API_BASE_URL);
+
 // Extended types for API responses
 interface APIVotingPool extends Omit<VotingPool, "options"> {
   hasImage?: boolean;
@@ -89,15 +92,9 @@ async function handleResponse<T>(response: Response): Promise<T> {
 function transformPoolData(apiPool: APIVotingPool): VotingPool {
   return {
     ...apiPool,
-    imageUrl: apiPool.hasImage
-      ? `${API_BASE_URL}/api/voting-pools/${apiPool.id}/image`
-      : undefined,
     options: apiPool.options.map((option) => ({
       ...option,
       voteCount: option._count?.votes || 0,
-      imageUrl: option.hasImage
-        ? `${API_BASE_URL}/api/voting-pools/option/${option.id}/image`
-        : undefined,
     })),
   };
 }

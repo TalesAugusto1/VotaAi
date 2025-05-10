@@ -178,9 +178,9 @@ export default function VotingPoolDetailScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header Image */}
         <View style={styles.headerContainer}>
-          {votingPool.imageUrl ? (
+          {votingPool.imageData ? (
             <Image
-              source={{ uri: votingPool.imageUrl }}
+              source={{ uri: votingPool.imageData }}
               style={styles.headerImage}
               contentFit="cover"
             />
