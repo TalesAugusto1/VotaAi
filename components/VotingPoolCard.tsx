@@ -37,6 +37,17 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
     0
   );
 
+  // Get winning option (for closed pools) or current leading option
+  const winningOption =
+    pool.options.length > 0
+      ? [...pool.options].sort((a, b) => b.voteCount - a.voteCount)[0]
+      : null;
+
+  const showWinner =
+    pool.status === "closed" && winningOption && winningOption.voteCount > 0;
+  const showLeader =
+    pool.status === "active" && winningOption && winningOption.voteCount > 0;
+
   // Get status text and color
   const getStatusInfo = () => {
     switch (pool.status) {
@@ -125,6 +136,32 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
         <ThemedText style={styles.description}>
           {truncateText(pool.description, 100)}
         </ThemedText>
+
+        {/* Winner information for closed pools */}
+        {showWinner && winningOption && (
+          <View style={styles.winnerContainer}>
+            <MaterialIcons name="emoji-events" size={16} color="#FFD700" />
+            <ThemedText style={styles.winnerText}>
+              Vencedor: {truncateText(winningOption.text, 40)} (
+              {winningOption.voteCount} votos)
+            </ThemedText>
+          </View>
+        )}
+
+        {/* Current leader for active pools */}
+        {showLeader && winningOption && (
+          <View style={styles.leaderContainer}>
+            <MaterialIcons
+              name="trending-up"
+              size={16}
+              color={Colors.light.tint}
+            />
+            <ThemedText style={styles.leaderText}>
+              Mais votado no momento: {truncateText(winningOption.text, 40)} (
+              {winningOption.voteCount} votos)
+            </ThemedText>
+          </View>
+        )}
 
         <View style={styles.footer}>
           <View style={styles.dateContainer}>
@@ -255,5 +292,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 4,
     opacity: 0.7,
+  },
+  winnerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 215, 0, 0.1)",
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  winnerText: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 6,
+    flex: 1,
+  },
+  leaderContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(33, 150, 243, 0.1)",
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  leaderText: {
+    fontSize: 14,
+    fontWeight: "500",
+    marginLeft: 6,
+    flex: 1,
   },
 });

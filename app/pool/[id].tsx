@@ -296,7 +296,12 @@ export default function VotingPoolDetailScreen() {
               {showResults ? "Resultados" : "Opções de Votação"}
             </ThemedText>
 
-            {votingPool.options.map((option) => (
+            {(showResults
+              ? [...votingPool.options].sort(
+                  (a, b) => b.voteCount - a.voteCount
+                )
+              : votingPool.options
+            ).map((option) => (
               <VotingOptionCard
                 key={option.id}
                 option={option}

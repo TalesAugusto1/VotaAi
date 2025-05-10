@@ -116,6 +116,19 @@ export default function ResultsScreen() {
     fetchVotedPools();
   }, [user, activeTab]);
 
+  // Sort the pools options by vote count in each pool
+  useEffect(() => {
+    if (votedPools.length > 0) {
+      const sortedPools = votedPools.map((pool) => {
+        return {
+          ...pool,
+          options: [...pool.options].sort((a, b) => b.voteCount - a.voteCount),
+        };
+      });
+      setVotedPools(sortedPools);
+    }
+  }, [votedPools.length]);
+
   const renderEmptyComponent = () => {
     if (isLoading) {
       return (
