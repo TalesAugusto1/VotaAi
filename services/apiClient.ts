@@ -22,6 +22,19 @@ interface APIVotingOption extends Omit<VotingOption, "voteCount"> {
   };
 }
 
+// Add a PaginatedResponse interface
+interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalCount: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+}
+
 // Token storage key
 const TOKEN_STORAGE_KEY = "VotaAi_token";
 
@@ -405,10 +418,12 @@ export const votingPoolsApi = {
   // Get all voting pools
   async getVotingPools(
     status?: "active" | "upcoming" | "closed",
-    forceRefresh = false
-  ): Promise<VotingPool[]> {
+    forceRefresh = false,
+    page = 1,
+    limit = 10
+  ): Promise<PaginatedResponse<VotingPool>> {
     // If we have a specific status, try to get from cache first
-    if (status && !forceRefresh) {
+    if (status && !forceRefresh && page === 1) {
       let cacheResult;
       if (status === "active") {
         cacheResult = cacheService.getActiveVotingPools();
@@ -420,48 +435,109 @@ export const votingPoolsApi = {
 
       if (cacheResult && cacheResult.isCached && cacheResult.data.length > 0) {
         console.log(`Using cached ${status} voting pools`);
-        return cacheResult.data;
+        return {
+          data: cacheResult.data,
+          pagination: {
+            page: 1,
+            limit,
+            totalCount: cacheResult.data.length,
+            totalPages: Math.ceil(cacheResult.data.length / limit),
+            hasNextPage: cacheResult.data.length > limit,
+            hasPreviousPage: false,
+          },
+        };
       }
     }
 
     // If not cached or force refresh, fetch from API
     let url = `${API_BASE_URL}/api/voting-pools`;
 
+    // Add query parameters
+    const params = new URLSearchParams();
     if (status) {
-      url += `?status=${status}`;
+      params.append("status", status);
     }
+    params.append("page", page.toString());
+    params.append("limit", limit.toString());
 
-    const response = await fetch(url);
-    const data = await handleResponse<APIVotingPool[]>(response);
+    url += `?${params.toString()}`;
 
-    // Transform API response to match app data structure
-    const transformedData = data.map(transformPoolData);
+    console.log(`Fetching pools with URL: ${url}`);
 
-    // Update cache based on status
-    if (status === "active") {
-      cacheService.setActiveVotingPools(transformedData);
-    } else if (status === "upcoming") {
-      cacheService.setUpcomingVotingPools(transformedData);
-    } else if (status === "closed") {
-      cacheService.setClosedVotingPools(transformedData);
+    try {
+      const response = await fetch(url);
+      const data = await handleResponse<{
+        data: APIVotingPool[];
+        pagination: {
+          page: number;
+          limit: number;
+          totalCount: number;
+          totalPages: number;
+          hasNextPage: boolean;
+          hasPreviousPage: boolean;
+        };
+      }>(response);
+
+      // Transform API response to match app data structure
+      const transformedData = data.data.map(transformPoolData);
+
+      // Update cache based on status (only for first page)
+      if (status && page === 1) {
+        if (status === "active") {
+          cacheService.setActiveVotingPools(transformedData);
+        } else if (status === "upcoming") {
+          cacheService.setUpcomingVotingPools(transformedData);
+        } else if (status === "closed") {
+          cacheService.setClosedVotingPools(transformedData);
+        }
+      }
+
+      return {
+        data: transformedData,
+        pagination: data.pagination,
+      };
+    } catch (error) {
+      console.error("Error fetching voting pools:", error);
+      // Return empty data with pagination for error case
+      return {
+        data: [],
+        pagination: {
+          page,
+          limit,
+          totalCount: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: page > 1,
+        },
+      };
     }
-
-    return transformedData;
   },
 
   // Get active voting pools
-  async getActiveVotingPools(forceRefresh = false): Promise<VotingPool[]> {
-    return this.getVotingPools("active", forceRefresh);
+  async getActiveVotingPools(
+    forceRefresh = false,
+    page = 1,
+    limit = 10
+  ): Promise<PaginatedResponse<VotingPool>> {
+    return this.getVotingPools("active", forceRefresh, page, limit);
   },
 
   // Get upcoming voting pools
-  async getUpcomingVotingPools(forceRefresh = false): Promise<VotingPool[]> {
-    return this.getVotingPools("upcoming", forceRefresh);
+  async getUpcomingVotingPools(
+    forceRefresh = false,
+    page = 1,
+    limit = 10
+  ): Promise<PaginatedResponse<VotingPool>> {
+    return this.getVotingPools("upcoming", forceRefresh, page, limit);
   },
 
   // Get closed voting pools
-  async getClosedVotingPools(forceRefresh = false): Promise<VotingPool[]> {
-    return this.getVotingPools("closed", forceRefresh);
+  async getClosedVotingPools(
+    forceRefresh = false,
+    page = 1,
+    limit = 10
+  ): Promise<PaginatedResponse<VotingPool>> {
+    return this.getVotingPools("closed", forceRefresh, page, limit);
   },
 
   // Get a voting pool by ID
@@ -696,6 +772,75 @@ export const votingPoolsApi = {
     type: "active" | "upcoming" | "closed" | "all" = "all"
   ): void {
     cacheService.invalidateCache(type);
+  },
+
+  // Get multiple voting pools by IDs in a single request
+  async getBatchVotingPools(
+    ids: string[],
+    forceRefresh = false
+  ): Promise<Record<string, VotingPool>> {
+    try {
+      // Check cache first for all IDs unless force refresh is requested
+      if (!forceRefresh) {
+        const cachedResults: Record<string, VotingPool> = {};
+        const uncachedIds: string[] = [];
+
+        // Try to get each pool from cache
+        for (const id of ids) {
+          const cacheResult = cacheService.getVotingPoolById(id);
+          if (cacheResult.isCached && cacheResult.data) {
+            cachedResults[id] = cacheResult.data;
+          } else {
+            uncachedIds.push(id);
+          }
+        }
+
+        // If all IDs are cached, return immediately
+        if (uncachedIds.length === 0) {
+          console.log(`Using cached data for all ${ids.length} pools`);
+          return cachedResults;
+        }
+
+        // Otherwise, fetch only the uncached IDs
+        console.log(
+          `Using cached data for ${
+            ids.length - uncachedIds.length
+          } pools, fetching ${uncachedIds.length} from API`
+        );
+        ids = uncachedIds;
+      }
+
+      // If no IDs to fetch, return empty object
+      if (ids.length === 0) {
+        return {};
+      }
+
+      // Fetch from API
+      const idsParam = ids.join(",");
+      const response = await fetch(
+        `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch batch voting pools: ${response.status}`
+        );
+      }
+
+      const pools = (await response.json()) as VotingPool[];
+      const result: Record<string, VotingPool> = {};
+
+      // Add each pool to the result and update cache
+      pools.forEach((pool) => {
+        result[pool.id] = pool;
+        cacheService.setVotingPoolById(pool.id, pool);
+      });
+
+      return result;
+    } catch (error) {
+      console.error("Error fetching batch voting pools:", error);
+      return {};
+    }
   },
 };
 

@@ -52,13 +52,22 @@ export default function HomeScreen() {
       }
 
       // First, get the list of all pool IDs with the forceRefresh parameter
-      const pools = await votingPoolsApi.getActiveVotingPools(forceRefresh);
+      const poolsResponse = await votingPoolsApi.getActiveVotingPools(
+        forceRefresh
+      );
+
+      // Make sure poolsResponse.data exists before accessing it
+      if (!poolsResponse || !poolsResponse.data) {
+        console.error("Invalid pools response:", poolsResponse);
+        setIsLoading(false);
+        return;
+      }
 
       // Set the IDs to render skeleton placeholders
-      setAllPoolIds(pools.map((pool) => pool.id));
+      setAllPoolIds(poolsResponse.data.map((pool) => pool.id));
 
       // For each pool ID, either load from cache or fetch
-      pools.forEach(async (basicPool) => {
+      poolsResponse.data.forEach(async (basicPool) => {
         try {
           const pool = await votingPoolsApi.getVotingPoolById(
             basicPool.id,

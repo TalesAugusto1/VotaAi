@@ -88,73 +88,124 @@ export default function CalendarPoolsScreen() {
   const [activeTab, setActiveTab] = useState<TabType>("all");
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const { visible, options, showModal, hideModal } = useModal();
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  // Fetch pools from API
+  // Fetch pools from API with support for pagination
   const fetchPools = async (
     tabType: TabType = activeTab,
-    forceRefresh = false
+    forceRefresh = false,
+    page = 1
   ) => {
     try {
-      // Only show loading indicator on initial load or when forcing refresh
-      if (Object.keys(loadedPools).length === 0 || forceRefresh) {
+      // Only show loading indicator on initial load or when forcing refresh on first page
+      if (
+        (Object.keys(loadedPools).length === 0 || forceRefresh) &&
+        page === 1
+      ) {
         setLoading(true);
       }
 
-      if (forceRefresh) {
-        setLoadedPools({}); // Clear loaded pools only on forced refresh
+      if (forceRefresh && page === 1) {
+        setLoadedPools({}); // Clear loaded pools only on forced refresh of first page
       }
 
       let poolIds: string[] = [];
 
-      // Get pools based on tab type, with forceRefresh parameter
+      // Get pools based on tab type, with forceRefresh parameter and pagination
       if (tabType === "all") {
+        // For "all" tab, we need to fetch all types with pagination and combine them
         const activePools = await votingPoolsApi.getActiveVotingPools(
-          forceRefresh
+          forceRefresh,
+          page
         );
         const upcomingPools = await votingPoolsApi.getUpcomingVotingPools(
-          forceRefresh
+          forceRefresh,
+          page
         );
         const closedPools = await votingPoolsApi.getClosedVotingPools(
-          forceRefresh
+          forceRefresh,
+          page
         );
 
-        const allPools = [...activePools, ...upcomingPools, ...closedPools];
+        // Combine data and calculate total pages as max of all three
+        const allPools = [
+          ...activePools.data,
+          ...upcomingPools.data,
+          ...closedPools.data,
+        ];
+
         poolIds = allPools.map((pool) => pool.id);
-      } else if (tabType === "active") {
-        const pools = await votingPoolsApi.getActiveVotingPools(forceRefresh);
-        poolIds = pools.map((pool) => pool.id);
-      } else if (tabType === "upcoming") {
-        const pools = await votingPoolsApi.getUpcomingVotingPools(forceRefresh);
-        poolIds = pools.map((pool) => pool.id);
-      } else if (tabType === "closed") {
-        const pools = await votingPoolsApi.getClosedVotingPools(forceRefresh);
-        poolIds = pools.map((pool) => pool.id);
+
+        // Set total pages to the maximum of the three pool types
+        const maxTotalPages = Math.max(
+          activePools.pagination.totalPages,
+          upcomingPools.pagination.totalPages,
+          closedPools.pagination.totalPages
+        );
+
+        setTotalPages(maxTotalPages);
+      } else {
+        // For specific tabs, fetch just that type
+        let result;
+        if (tabType === "active") {
+          result = await votingPoolsApi.getActiveVotingPools(
+            forceRefresh,
+            page
+          );
+        } else if (tabType === "upcoming") {
+          result = await votingPoolsApi.getUpcomingVotingPools(
+            forceRefresh,
+            page
+          );
+        } else if (tabType === "closed") {
+          result = await votingPoolsApi.getClosedVotingPools(
+            forceRefresh,
+            page
+          );
+        }
+
+        if (result) {
+          poolIds = result.data.map((pool) => pool.id);
+          setTotalPages(result.pagination.totalPages);
+        }
       }
 
-      // Set the IDs to render skeleton placeholders
-      setAllPoolIds(poolIds);
+      // Update all pool IDs if this is first page or append if loading more
+      if (page === 1) {
+        setAllPoolIds(poolIds);
+      } else {
+        setAllPoolIds((prev) => [
+          ...prev,
+          ...poolIds.filter((id) => !prev.includes(id)),
+        ]);
+      }
 
-      // Now fetch each pool individually, using cache when possible
-      poolIds.forEach(async (id) => {
-        try {
-          // Remove artificial delay - it's no longer needed with caching
-          // Get pool with forceRefresh parameter
-          const pool = await votingPoolsApi.getVotingPoolById(id, forceRefresh);
+      if (poolIds.length === 0) {
+        setLoading(false);
+        setIsLoadingMore(false);
+        return;
+      }
 
-          if (pool) {
-            // Add this pool to the loaded pools
-            setLoadedPools((current) => ({
-              ...current,
-              [id]: pool,
-            }));
-          }
-        } catch (error) {
-          console.error(`Error loading pool ${id}:`, error);
-        }
-      });
+      console.log(`Fetching ${poolIds.length} pools details using batch API`);
+
+      // Use batch API to fetch all pools at once
+      const batchResults = await votingPoolsApi.getBatchVotingPools(
+        poolIds,
+        forceRefresh
+      );
+
+      // Update loaded pools - append to existing if loading more pages
+      if (page === 1) {
+        setLoadedPools(batchResults);
+      } else {
+        setLoadedPools((prev) => ({ ...prev, ...batchResults }));
+      }
 
       setError(null);
       setLoading(false);
+      setIsLoadingMore(false);
     } catch (err) {
       console.error("Error loading pools:", err);
       showModal({
@@ -166,6 +217,7 @@ export default function CalendarPoolsScreen() {
       setAllPoolIds([]);
       setLoadedPools({});
       setLoading(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -198,15 +250,26 @@ export default function CalendarPoolsScreen() {
     setSelectedDate(date);
   };
 
+  // Load more function for pagination
+  const handleLoadMore = () => {
+    if (currentPage < totalPages && !isLoadingMore) {
+      setIsLoadingMore(true);
+      setCurrentPage((prev) => prev + 1);
+      fetchPools(activeTab, false, currentPage + 1);
+    }
+  };
+
   useEffect(() => {
-    // When changing tabs, try to use cached data first
-    fetchPools(activeTab, false);
+    // When changing tabs, reset pagination and try to use cached data first
+    setCurrentPage(1);
+    fetchPools(activeTab, false, 1);
   }, [activeTab]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setCurrentPage(1);
     // Force refresh from API on manual refresh
-    await fetchPools(activeTab, true);
+    await fetchPools(activeTab, true, 1);
     setRefreshing(false);
   }, [activeTab]);
 
@@ -607,11 +670,13 @@ export default function CalendarPoolsScreen() {
                             { color: isDark ? "#AEAEB2" : "#8E8E93" },
                           ]}
                         >
-                          {pool.options.reduce(
-                            (sum, option) => sum + option.voteCount,
-                            0
-                          )}{" "}
-                          votos
+                          {(() => {
+                            const voteCount = pool.options.reduce(
+                              (sum, option) => sum + (option.voteCount || 0),
+                              0
+                            );
+                            return isNaN(voteCount) ? "" : `${voteCount} votos`;
+                          })()}
                         </Text>
                       </View>
                     </View>
@@ -645,6 +710,19 @@ export default function CalendarPoolsScreen() {
         }
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        onScroll={({ nativeEvent }) => {
+          // Auto load more when reaching the bottom of the scroll
+          const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+          const paddingToBottom = 20;
+          const isCloseToBottom =
+            layoutMeasurement.height + contentOffset.y >=
+            contentSize.height - paddingToBottom;
+
+          if (isCloseToBottom && !isLoadingMore && currentPage < totalPages) {
+            handleLoadMore();
+          }
+        }}
+        scrollEventThrottle={400}
       >
         {/* Calendar container with subtle shadow */}
         <View
@@ -806,9 +884,35 @@ export default function CalendarPoolsScreen() {
           renderEmptyComponent() || renderPoolsList()
         )}
 
+        {/* Add "Load More" button at the end */}
+        {renderLoadMoreButton()}
+
         <View style={{ height: 80 }} />
       </ScrollView>
     );
+  };
+
+  // Add "Load More" button at the bottom of the pools list
+  const renderLoadMoreButton = () => {
+    if (currentPage < totalPages) {
+      return (
+        <TouchableOpacity
+          style={[
+            styles.loadMoreButton,
+            { backgroundColor: isDark ? "#1C1C1E" : "#FFFFFF" },
+          ]}
+          onPress={handleLoadMore}
+          disabled={isLoadingMore}
+        >
+          {isLoadingMore ? (
+            <ActivityIndicator size="small" color={themeColors.tint} />
+          ) : (
+            <Text style={{ color: themeColors.tint }}>Carregar mais</Text>
+          )}
+        </TouchableOpacity>
+      );
+    }
+    return null;
   };
 
   return (
@@ -1086,5 +1190,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
+  },
+  loadMoreButton: {
+    padding: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
 });

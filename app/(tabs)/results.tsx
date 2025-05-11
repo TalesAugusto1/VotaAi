@@ -76,56 +76,42 @@ export default function ResultsScreen() {
         return;
       }
 
-      // Set the pool IDs we'll be loading
+      // Extract pool IDs
       const poolIds = poolResults.map((result) => result.poolId);
       setAllPoolIds(poolIds);
 
       console.log("Pool IDs to fetch:", poolIds);
 
-      // Fetch each pool individually, using cache when possible
-      let loadedCount = 0;
-      const totalToLoad = poolIds.length;
+      try {
+        // Use the new batch endpoint to fetch all pools at once
+        const batchResults = await votingPoolsApi.getBatchVotingPools(
+          poolIds,
+          forceRefresh
+        );
 
-      poolIds.forEach(async (id) => {
-        try {
-          // Get pool with forceRefresh parameter
-          const pool = await votingPoolsApi.getVotingPoolById(id, forceRefresh);
+        // Process the results and sort options by vote count
+        const processedPools: Record<string, VotingPool> = {};
 
-          if (pool) {
-            // Sort options by vote count
-            const sortedPool = {
-              ...pool,
-              options: [...pool.options].sort(
-                (a, b) => b.voteCount - a.voteCount
-              ),
-            };
+        Object.entries(batchResults).forEach(([id, pool]) => {
+          // Sort options by vote count
+          const sortedPool = {
+            ...pool,
+            options: [...pool.options].sort(
+              (a, b) => b.voteCount - a.voteCount
+            ),
+          };
 
-            // Add this pool to the loaded pools
-            setLoadedPools((current) => ({
-              ...current,
-              [id]: sortedPool,
-            }));
-          }
+          processedPools[id] = sortedPool;
+        });
 
-          // Track loaded pools to set loading to false when all are done
-          loadedCount++;
-          if (loadedCount >= totalToLoad) {
-            setIsLoading(false);
-          }
-        } catch (error) {
-          console.error(`Error loading pool ${id}:`, error);
-          // Track failed loads too
-          loadedCount++;
-          if (loadedCount >= totalToLoad) {
-            setIsLoading(false);
-          }
-        }
-      });
-
-      // Set a safety timeout to ensure loading state is removed even if some requests fail
-      setTimeout(() => {
+        // Update state with all processed pools
+        setLoadedPools(processedPools);
         setIsLoading(false);
-      }, 10000); // 10 second safety timeout
+      } catch (error) {
+        console.error("Error loading pools batch:", error);
+        setErrorMessage("Falha ao carregar detalhes das votações.");
+        setIsLoading(false);
+      }
     } catch (error: any) {
       console.error("Error fetching voted pools:", error);
       setErrorMessage(
