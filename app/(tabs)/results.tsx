@@ -44,7 +44,7 @@ export default function ResultsScreen() {
   const { user } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
-  const { visible, options, showModal, hideModal } = useModal();
+  const { visible, options, showModal, hideModal, showErrorModal } = useModal();
 
   const fetchVotedPools = async () => {
     if (!user) return;
@@ -104,11 +104,14 @@ export default function ResultsScreen() {
       setIsLoading(false);
     } catch (error) {
       console.error("Error fetching voted pools:", error);
-      showModal({
-        title: "Erro",
-        message: "Falha ao carregar os resultados. Tente novamente mais tarde.",
-        type: "error",
-      });
+
+      // Use the new error handling system
+      if (error.response?.status === 429) {
+        showErrorModal(error, "rateLimit");
+      } else {
+        showErrorModal(error);
+      }
+
       setAllPoolIds([]);
       setIsLoading(false);
     }

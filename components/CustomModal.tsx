@@ -15,7 +15,9 @@ interface CustomModalProps {
   visible: boolean;
   title: string;
   message: string;
+  suggestion?: string;
   type?: "success" | "error" | "info" | "warning";
+  icon?: string;
   onClose: () => void;
   actions?: {
     text: string;
@@ -28,7 +30,9 @@ export function CustomModal({
   visible,
   title,
   message,
+  suggestion,
   type = "info",
+  icon,
   onClose,
   actions = [{ text: "OK", onPress: () => onClose(), style: "default" }],
 }: CustomModalProps) {
@@ -39,23 +43,23 @@ export function CustomModal({
     switch (type) {
       case "success":
         return {
-          icon: "checkmark-circle",
+          icon: icon || "checkmark-circle",
           color: "#4CAF50",
         };
       case "error":
         return {
-          icon: "close-circle",
+          icon: icon || "close-circle",
           color: "#F44336",
         };
       case "warning":
         return {
-          icon: "warning",
+          icon: icon || "warning",
           color: "#FFC107",
         };
       case "info":
       default:
         return {
-          icon: "information-circle",
+          icon: icon || "information-circle",
           color: Colors.light.tint,
         };
     }
@@ -99,6 +103,12 @@ export function CustomModal({
 
               <ThemedText style={styles.modalTitle}>{title}</ThemedText>
               <ThemedText style={styles.modalText}>{message}</ThemedText>
+
+              {suggestion && (
+                <ThemedText style={styles.suggestionText}>
+                  {suggestion}
+                </ThemedText>
+              )}
 
               <View
                 style={[
@@ -195,6 +205,14 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 16,
     lineHeight: 24,
+  },
+  suggestionText: {
+    marginBottom: 20,
+    textAlign: "center",
+    fontSize: 14,
+    lineHeight: 20,
+    opacity: 0.8,
+    fontStyle: "italic",
   },
   actionsContainer: {
     width: "100%",

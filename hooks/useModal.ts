@@ -1,9 +1,12 @@
 import { useState } from "react";
+import { getErrorDetails, ErrorType } from "../services/errorHandler";
 
 interface ModalOptions {
   title?: string;
   message: string;
+  suggestion?: string;
   type?: "success" | "error" | "info" | "warning";
+  icon?: string;
   actions?: {
     text: string;
     onPress: () => void;
@@ -31,6 +34,25 @@ export function useModal() {
     setVisible(true);
   };
 
+  const showErrorModal = (error: any, errorType?: ErrorType) => {
+    const errorDetails = getErrorDetails(error, errorType);
+
+    showModal({
+      title: errorDetails.title,
+      message: errorDetails.message,
+      suggestion: errorDetails.suggestion,
+      type: "error",
+      icon: errorDetails.icon,
+      actions: [
+        {
+          text: "OK",
+          onPress: () => hideModal(),
+          style: "default",
+        },
+      ],
+    });
+  };
+
   const hideModal = () => {
     setVisible(false);
   };
@@ -39,6 +61,7 @@ export function useModal() {
     visible,
     options,
     showModal,
+    showErrorModal,
     hideModal,
   };
 }
