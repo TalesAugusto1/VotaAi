@@ -7,7 +7,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -26,6 +26,8 @@ import { ThemedView } from "../components/ThemedView";
 import { Colors } from "../constants/Colors";
 import { useAuth } from "../context/AuthContext";
 import { votingPoolsApi } from "../services/apiClient";
+import { CustomModal } from "../components/CustomModal";
+import { useModal } from "../hooks/useModal";
 
 // Define interfaces for type safety
 interface OptionForm {
@@ -54,6 +56,7 @@ export default function CreatePoolScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { visible, options: modalOptions, showModal, hideModal } = useModal();
 
   // Form state
   const [title, setTitle] = useState("");
@@ -299,12 +302,24 @@ export default function CreatePoolScreen() {
         );
 
         console.log("Pool created successfully", response);
-        Alert.alert("Sucesso", "Votação criada com sucesso!", [
-          {
-            text: "OK",
-            onPress: () => router.back(),
-          },
-        ]);
+        showModal({
+          title: "Sucesso",
+          message: "Votação criada com sucesso!",
+          type: "success",
+          actions: [
+            {
+              text: "OK",
+              onPress: () => {
+                hideModal();
+                // Navigate to home tab with refresh parameter
+                router.replace({
+                  pathname: "/(tabs)/",
+                  params: { refresh: "true", timestamp: Date.now() },
+                });
+              },
+            },
+          ],
+        });
       } catch (apiError) {
         console.error("API Error creating voting pool:", apiError);
         const message =
@@ -312,9 +327,20 @@ export default function CreatePoolScreen() {
             ? apiError.message
             : "Erro desconhecido ao criar votação";
 
-        Alert.alert("Erro ao criar votação", message, [
-          { text: "Tentar novamente", onPress: () => setIsSubmitting(false) },
-        ]);
+        showModal({
+          title: "Erro ao criar votação",
+          message: message,
+          type: "error",
+          actions: [
+            {
+              text: "Tentar novamente",
+              onPress: () => {
+                hideModal();
+                setIsSubmitting(false);
+              },
+            },
+          ],
+        });
         setError(message);
       }
     } catch (error) {
@@ -543,6 +569,15 @@ export default function CreatePoolScreen() {
           </TouchableOpacity>
         </ThemedView>
       </ScrollView>
+
+      <CustomModal
+        visible={visible}
+        title={modalOptions.title || ""}
+        message={modalOptions.message}
+        type={modalOptions.type}
+        onClose={hideModal}
+        actions={modalOptions.actions}
+      />
     </KeyboardAvoidingView>
   );
 }

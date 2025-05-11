@@ -18,6 +18,7 @@ import { resultsApi, votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
 import { CustomModal } from "../../components/CustomModal";
 import { useModal } from "../../hooks/useModal";
+import { PoolSkeleton } from "../../components/PoolSkeleton";
 
 interface PoolResult {
   poolId: string;
@@ -33,7 +34,10 @@ interface PoolResult {
 }
 
 export default function ResultsScreen() {
-  const [votedPools, setVotedPools] = useState<VotingPool[]>([]);
+  const [allPoolIds, setAllPoolIds] = useState<string[]>([]);
+  const [loadedPools, setLoadedPools] = useState<Record<string, VotingPool>>(
+    {}
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"active" | "closed">("active");
@@ -47,6 +51,8 @@ export default function ResultsScreen() {
 
     try {
       setIsLoading(true);
+      setLoadedPools({}); // Clear loaded pools
+
       console.log("Fetching voted pools for status:", activeTab);
 
       // Get user voted pools results
@@ -54,58 +60,48 @@ export default function ResultsScreen() {
       console.log("Received pool results:", poolResults?.length || 0);
 
       if (!poolResults || poolResults.length === 0) {
-        setVotedPools([]);
+        setAllPoolIds([]);
+        setIsLoading(false);
         return;
       }
 
-      // Now get the complete pool data for each result
+      // Set the pool IDs we'll be loading
       const poolIds = poolResults.map((result) => result.poolId);
+      setAllPoolIds(poolIds);
+
       console.log("Pool IDs to fetch:", poolIds);
 
-      try {
-        const poolsData = await Promise.all(
-          poolIds.map((id) => votingPoolsApi.getVotingPoolById(id))
-        );
+      // Fetch each pool individually
+      poolIds.forEach(async (id) => {
+        try {
+          // Add a small random delay to simulate variable network conditions
+          const randomDelay = Math.floor(Math.random() * 800) + 200; // 200-1000ms
+          await new Promise((resolve) => setTimeout(resolve, randomDelay));
 
-        // Filter out null values
-        const validPools = poolsData.filter(
-          (pool): pool is VotingPool => pool !== null
-        );
-        console.log(
-          `Successfully fetched ${validPools.length} out of ${poolIds.length} pools`
-        );
+          const pool = await votingPoolsApi.getVotingPoolById(id);
 
-        // Sort the options within each pool by vote count
-        const sortedPools = validPools.map((pool) => ({
-          ...pool,
-          options: [...pool.options].sort((a, b) => b.voteCount - a.voteCount),
-        }));
+          if (pool) {
+            // Sort options by vote count
+            const sortedPool = {
+              ...pool,
+              options: [...pool.options].sort(
+                (a, b) => b.voteCount - a.voteCount
+              ),
+            };
 
-        setVotedPools(sortedPools);
-      } catch (poolFetchError) {
-        console.error("Error fetching individual pools:", poolFetchError);
-        // Try to use the basic pool data from results
-        const fallbackPools = poolResults.map((result) => ({
-          id: result.poolId,
-          title: result.title,
-          status: result.status,
-          description: "Dados completos indisponíveis",
-          category: "Geral",
-          startDate: new Date(),
-          endDate: new Date(),
-          anonymous: false,
-          options: result.results
-            .sort((a, b) => b.voteCount - a.voteCount)
-            .map((r) => ({
-              id: r.id,
-              text: r.text,
-              voteCount: r.voteCount,
-              description: "",
-            })),
-        })) as unknown as VotingPool[];
+            // Add this pool to the loaded pools
+            setLoadedPools((current) => ({
+              ...current,
+              [id]: sortedPool,
+            }));
+          }
+        } catch (error) {
+          console.error(`Error loading pool ${id}:`, error);
+        }
+      });
 
-        setVotedPools(fallbackPools);
-      }
+      // Set loading to false now that we've started loading all pools
+      setIsLoading(false);
     } catch (error) {
       console.error("Error fetching voted pools:", error);
       showModal({
@@ -113,8 +109,7 @@ export default function ResultsScreen() {
         message: "Falha ao carregar os resultados. Tente novamente mais tarde.",
         type: "error",
       });
-      setVotedPools([]);
-    } finally {
+      setAllPoolIds([]);
       setIsLoading(false);
     }
   };
@@ -130,26 +125,55 @@ export default function ResultsScreen() {
   }, [user, activeTab]);
 
   const renderEmptyComponent = () => {
-    if (isLoading) {
+    // If we have IDs but none have loaded yet, show skeletons
+    if (allPoolIds.length > 0 && Object.keys(loadedPools).length === 0) {
+      return (
+        <View style={styles.skeletonContainer}>
+          {Array.from({ length: Math.min(allPoolIds.length, 3) }).map(
+            (_, index) => (
+              <PoolSkeleton key={index} index={index} />
+            )
+          )}
+        </View>
+      );
+    }
+
+    // If loading is complete and there are no pools
+    if (!isLoading && allPoolIds.length === 0) {
       return (
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={Colors.light.tint} />
-          <ThemedText style={styles.loadingText}>
-            Carregando resultados...
+          <ThemedText style={styles.emptyText}>
+            {activeTab === "active"
+              ? "Você ainda não votou em nenhuma votação ativa."
+              : "Você não participou de votações encerradas."}
           </ThemedText>
         </View>
       );
     }
 
-    return (
-      <View style={styles.centerContainer}>
-        <ThemedText style={styles.emptyText}>
-          {activeTab === "active"
-            ? "Você ainda não votou em nenhuma votação ativa."
-            : "Você não participou de votações encerradas."}
-        </ThemedText>
-      </View>
-    );
+    return null;
+  };
+
+  // Prepare data for FlatList
+  const renderData = allPoolIds.map((id) => ({
+    id,
+    loaded: !!loadedPools[id],
+    pool: loadedPools[id],
+  }));
+
+  // Render item based on loaded state
+  const renderItem = ({
+    item,
+    index,
+  }: {
+    item: { id: string; loaded: boolean; pool?: VotingPool };
+    index: number;
+  }) => {
+    if (!item.loaded) {
+      return <PoolSkeleton index={index} />;
+    }
+
+    return <VotingPoolCard pool={item.pool!} />;
   };
 
   return (
@@ -204,9 +228,9 @@ export default function ResultsScreen() {
       </View>
 
       <FlatList
-        data={votedPools}
+        data={renderData}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <VotingPoolCard pool={item} />}
+        renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={renderEmptyComponent}
         refreshControl={
@@ -280,5 +304,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
     opacity: 0.7,
+  },
+  skeletonContainer: {
+    flex: 1,
   },
 });
