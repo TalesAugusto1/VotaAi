@@ -6,6 +6,9 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import "react-native-reanimated";
 import { AuthProvider, useAuth } from "../context/AuthContext";
+import { NetworkProvider } from "../context/NetworkContext";
+import { OfflineBanner } from "../components/OfflineBanner";
+import { PendingVotesIndicator } from "../components/PendingVotesIndicator";
 
 // Prevent the splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -43,6 +46,8 @@ function RootLayoutContent() {
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />
+      <OfflineBanner />
+      <PendingVotesIndicator />
     </ThemeProvider>
   );
 }
@@ -65,8 +70,10 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <RootLayoutContent />
-    </AuthProvider>
+    <NetworkProvider>
+      <AuthProvider>
+        <RootLayoutContent />
+      </AuthProvider>
+    </NetworkProvider>
   );
 }

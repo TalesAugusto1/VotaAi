@@ -93,12 +93,25 @@ export default function ResultsScreen() {
         const processedPools: Record<string, VotingPool> = {};
 
         Object.entries(batchResults).forEach(([id, pool]) => {
+          // Ensure pool is valid
+          if (!pool || !pool.options) {
+            console.log(`Skipping invalid pool ${id}`);
+            return;
+          }
+
+          // Validate options and vote counts
+          const validatedOptions = pool.options.map((option) => ({
+            ...option,
+            voteCount:
+              typeof option.voteCount === "number" && !isNaN(option.voteCount)
+                ? option.voteCount
+                : 0,
+          }));
+
           // Sort options by vote count
           const sortedPool = {
             ...pool,
-            options: [...pool.options].sort(
-              (a, b) => b.voteCount - a.voteCount
-            ),
+            options: validatedOptions.sort((a, b) => b.voteCount - a.voteCount),
           };
 
           processedPools[id] = sortedPool;

@@ -14,15 +14,18 @@ import {
 import { ThemedText } from "../../components/ThemedText";
 import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
+import { useNetwork } from "../../context/NetworkContext";
 import {
   authApi,
   resultsApi,
   votesApi,
   votingPoolsApi,
 } from "../../services/apiClient";
+import { offlineVoteManager } from "../../services/offlineVoteManager";
 import { Vote } from "../../types";
 import { CustomModal } from "../../components/CustomModal";
 import { useModal } from "../../hooks/useModal";
+import { router } from "expo-router";
 
 interface UserVote extends Vote {
   pool?: {
@@ -35,6 +38,7 @@ export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const { isConnected } = useNetwork();
   const { visible, options, showModal, hideModal } = useModal();
   const [voteStats, setVoteStats] = useState({
     totalVotes: 0,
@@ -42,6 +46,7 @@ export default function ProfileScreen() {
     closedVotes: 0,
   });
   const [recentVotes, setRecentVotes] = useState<UserVote[]>([]);
+  const [pendingVotes, setPendingVotes] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -68,6 +73,10 @@ export default function ProfileScreen() {
           activeVotes: activeResults.length,
           closedVotes: closedResults.length,
         });
+
+        // Check for pending offline votes
+        const offlineVotes = await offlineVoteManager.getPendingVotes();
+        setPendingVotes(offlineVotes.length);
 
         // Get recent votes with pool info
         if (userVotes.length > 0) {
@@ -145,6 +154,10 @@ export default function ProfileScreen() {
         },
       ],
     });
+  };
+
+  const navigateToOfflineVotes = () => {
+    router.push("/offline-votes");
   };
 
   if (!user) {
@@ -314,24 +327,55 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      <TouchableOpacity
-        style={[
-          styles.logoutButton,
-          { backgroundColor: isDark ? "#2C2C2E" : "#F2F2F7" },
-        ]}
-        onPress={handleLogout}
-      >
-        <Ionicons name="log-out" size={20} color="#FF3B30" />
-        <ThemedText style={styles.logoutText}>Sair da Conta</ThemedText>
-      </TouchableOpacity>
+      <View style={styles.section}>
+        <ThemedText style={styles.sectionTitle}>Configurações</ThemedText>
+
+        <TouchableOpacity
+          style={[
+            styles.settingItem,
+            { backgroundColor: isDark ? "#1C1C1E" : "#FFFFFF" },
+          ]}
+          onPress={navigateToOfflineVotes}
+        >
+          <Ionicons
+            name="cloud-offline-outline"
+            size={20}
+            color={Colors.light.tint}
+          />
+          <ThemedText style={styles.settingText}>Votos Offline</ThemedText>
+          {pendingVotes > 0 && (
+            <View style={styles.badge}>
+              <ThemedText style={styles.badgeText}>{pendingVotes}</ThemedText>
+            </View>
+          )}
+          <Ionicons
+            name="chevron-forward"
+            size={20}
+            color={isDark ? "#8E8E93" : "#C7C7CC"}
+            style={styles.settingIcon}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.logoutButton,
+            { backgroundColor: isDark ? "#1C1C1E" : "#FFFFFF" },
+          ]}
+          onPress={handleLogout}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
+          <ThemedText style={[styles.logoutText, { color: "#FF3B30" }]}>
+            Sair da Conta
+          </ThemedText>
+        </TouchableOpacity>
+      </View>
 
       <CustomModal
         visible={visible}
-        title={options.title || ""}
-        message={options.message}
-        type={options.type}
-        onClose={hideModal}
-        actions={options.actions}
+        title={options?.title}
+        message={options?.message}
+        type={options?.type}
+        actions={options?.actions}
       />
     </ScrollView>
   );
@@ -483,5 +527,32 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: "#FF3B30",
     marginLeft: 8,
+  },
+  settingItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  settingText: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+  },
+  settingIcon: {
+    marginLeft: 8,
+  },
+  badge: {
+    backgroundColor: Colors.light.tint,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginRight: 8,
+  },
+  badgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "bold",
   },
 });

@@ -2,6 +2,8 @@ import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import { User, Vote, VotingOption, VotingPool } from "../types";
 import { cacheService } from "./cacheService";
+import { offlineVoteManager } from "./offlineVoteManager";
+import NetInfo from "@react-native-community/netinfo";
 
 // API base URL
 const API_BASE_URL = "http://192.168.15.15:3000";
@@ -422,50 +424,112 @@ export const votingPoolsApi = {
     page = 1,
     limit = 10
   ): Promise<PaginatedResponse<VotingPool>> {
-    // If we have a specific status, try to get from cache first
-    if (status && !forceRefresh && page === 1) {
-      let cacheResult;
-      if (status === "active") {
-        cacheResult = cacheService.getActiveVotingPools();
-      } else if (status === "upcoming") {
-        cacheResult = cacheService.getUpcomingVotingPools();
-      } else if (status === "closed") {
-        cacheResult = cacheService.getClosedVotingPools();
-      }
-
-      if (cacheResult && cacheResult.isCached && cacheResult.data.length > 0) {
-        console.log(`Using cached ${status} voting pools`);
-        return {
-          data: cacheResult.data,
-          pagination: {
-            page: 1,
-            limit,
-            totalCount: cacheResult.data.length,
-            totalPages: Math.ceil(cacheResult.data.length / limit),
-            hasNextPage: cacheResult.data.length > limit,
-            hasPreviousPage: false,
-          },
-        };
-      }
-    }
-
-    // If not cached or force refresh, fetch from API
-    let url = `${API_BASE_URL}/api/voting-pools`;
-
-    // Add query parameters
-    const params = new URLSearchParams();
-    if (status) {
-      params.append("status", status);
-    }
-    params.append("page", page.toString());
-    params.append("limit", limit.toString());
-
-    url += `?${params.toString()}`;
-
-    console.log(`Fetching pools with URL: ${url}`);
-
     try {
-      const response = await fetch(url);
+      // Check network status first
+      const networkState = await NetInfo.fetch();
+      const isOnline = networkState.isConnected === true;
+
+      // If we're online and it's the first page, always fetch fresh data first
+      // to ensure we have images, but still use cache as fallback for errors
+      if (isOnline && page === 1 && !forceRefresh) {
+        try {
+          // Fetch from API first
+          const url = `${API_BASE_URL}/api/voting-pools`;
+          const params = new URLSearchParams();
+          if (status) {
+            params.append("status", status);
+          }
+          params.append("page", page.toString());
+          params.append("limit", limit.toString());
+
+          console.log(
+            `Fetching fresh pools with URL: ${url}?${params.toString()}`
+          );
+
+          const response = await fetch(`${url}?${params.toString()}`);
+          const data = await handleResponse<{
+            data: APIVotingPool[];
+            pagination: {
+              page: number;
+              limit: number;
+              totalCount: number;
+              totalPages: number;
+              hasNextPage: boolean;
+              hasPreviousPage: boolean;
+            };
+          }>(response);
+
+          // Transform API response to match app data structure
+          const transformedData = data.data.map(transformPoolData);
+
+          // Update cache based on status
+          if (status) {
+            if (status === "active") {
+              cacheService.setActiveVotingPools(transformedData);
+            } else if (status === "upcoming") {
+              cacheService.setUpcomingVotingPools(transformedData);
+            } else if (status === "closed") {
+              cacheService.setClosedVotingPools(transformedData);
+            }
+          }
+
+          return {
+            data: transformedData,
+            pagination: data.pagination,
+          };
+        } catch (error) {
+          console.error(
+            "Error fetching fresh pools, falling back to cache:",
+            error
+          );
+          // Continue to try cache if online fetch fails
+        }
+      }
+
+      // If we're offline, force refresh was requested, or fresh fetch failed,
+      // use the cached data as before
+      if (status && !forceRefresh) {
+        let cacheResult;
+        if (status === "active") {
+          cacheResult = await cacheService.getActiveVotingPools();
+        } else if (status === "upcoming") {
+          cacheResult = await cacheService.getUpcomingVotingPools();
+        } else if (status === "closed") {
+          cacheResult = await cacheService.getClosedVotingPools();
+        }
+
+        if (
+          cacheResult &&
+          cacheResult.isCached &&
+          cacheResult.data.length > 0
+        ) {
+          console.log(`Using cached ${status} voting pools`);
+          return {
+            data: cacheResult.data,
+            pagination: {
+              page: 1,
+              limit,
+              totalCount: cacheResult.data.length,
+              totalPages: Math.ceil(cacheResult.data.length / limit),
+              hasNextPage: cacheResult.data.length > limit,
+              hasPreviousPage: false,
+            },
+          };
+        }
+      }
+
+      // If forced refresh, offline with no cache, or not first page, fetch from API
+      const url = `${API_BASE_URL}/api/voting-pools`;
+      const params = new URLSearchParams();
+      if (status) {
+        params.append("status", status);
+      }
+      params.append("page", page.toString());
+      params.append("limit", limit.toString());
+
+      console.log(`Fetching pools with URL: ${url}?${params.toString()}`);
+
+      const response = await fetch(`${url}?${params.toString()}`);
       const data = await handleResponse<{
         data: APIVotingPool[];
         pagination: {
@@ -546,16 +610,61 @@ export const votingPoolsApi = {
     forceRefresh = false
   ): Promise<VotingPool | null> {
     try {
-      // Check cache first unless force refresh is requested
-      if (!forceRefresh) {
-        const cacheResult = cacheService.getVotingPoolById(id);
-        if (cacheResult.isCached && cacheResult.data) {
-          console.log(`Using cached pool ${id}`);
-          return cacheResult.data;
+      // Check network status first
+      const networkState = await NetInfo.fetch();
+      const isOnline = networkState.isConnected === true;
+
+      // If we're online and not forcing a refresh, try to fetch fresh data first
+      // but fall back to cache if there's an error
+      if (isOnline && !forceRefresh) {
+        try {
+          // Fetch fresh data from API
+          console.log(`Fetching fresh data for pool ${id}`);
+          const response = await fetch(
+            `${API_BASE_URL}/api/voting-pools/${id}`
+          );
+
+          if (!response.ok) {
+            if (response.status === 404) {
+              return null;
+            }
+            throw new Error("Failed to get voting pool");
+          }
+
+          const pool = (await response.json()) as APIVotingPool;
+
+          // Transform API response to match app data structure
+          const transformedPool = transformPoolData(pool);
+
+          // Update the cache
+          cacheService.setVotingPoolById(id, transformedPool);
+
+          console.log(
+            `Pool ${id} - Has image data: ${!!transformedPool.imageData}`
+          );
+          return transformedPool;
+        } catch (error) {
+          console.error(
+            `Error fetching fresh data for pool ${id}, trying cache:`,
+            error
+          );
+          // Continue to try cache if online fetch fails
         }
       }
 
-      // Fetch from API if not cached or force refresh
+      // If offline, force refresh was requested, or fresh fetch failed,
+      // check cache as before
+      if (!forceRefresh) {
+        const cacheResult = await cacheService.getVotingPoolById(id);
+        if (cacheResult.isCached && cacheResult.data) {
+          console.log(`Using cached pool ${id}`);
+          const poolData = cacheResult.data;
+          console.log(`Pool ${id} - Has image data: ${!!poolData.imageData}`);
+          return poolData;
+        }
+      }
+
+      // If no cached data or force refresh, fetch from API
       const response = await fetch(`${API_BASE_URL}/api/voting-pools/${id}`);
 
       if (!response.ok) {
@@ -573,6 +682,9 @@ export const votingPoolsApi = {
       // Update the cache
       cacheService.setVotingPoolById(id, transformedPool);
 
+      console.log(
+        `Pool ${id} - Has image data: ${!!transformedPool.imageData}`
+      );
       return transformedPool;
     } catch (error) {
       console.error("Get voting pool error:", error);
@@ -780,18 +892,64 @@ export const votingPoolsApi = {
     forceRefresh = false
   ): Promise<Record<string, VotingPool>> {
     try {
-      // Check cache first for all IDs unless force refresh is requested
-      if (!forceRefresh) {
-        const cachedResults: Record<string, VotingPool> = {};
-        const uncachedIds: string[] = [];
+      // Check network status first
+      const networkState = await NetInfo.fetch();
+      const isOnline = networkState.isConnected === true;
 
+      // If we're online and not forcing a refresh, we want to prioritize fresh data
+      // but still use cache as a fallback for any errors
+      if (isOnline && !forceRefresh) {
+        try {
+          // Fetch all IDs from the API to ensure we have images
+          const idsParam = ids.join(",");
+          console.log(`Fetching fresh batch data for ${ids.length} pools`);
+
+          const response = await fetch(
+            `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}`
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch batch voting pools: ${response.status}`
+            );
+          }
+
+          const apiPools = (await response.json()) as APIVotingPool[];
+          const result: Record<string, VotingPool> = {};
+
+          // Transform and cache all pools
+          for (const pool of apiPools) {
+            const transformedPool = transformPoolData(pool);
+            result[pool.id] = transformedPool;
+            await cacheService.setVotingPoolById(pool.id, transformedPool);
+          }
+
+          console.log(
+            `Successfully fetched fresh data for ${apiPools.length} pools`
+          );
+          return result;
+        } catch (error) {
+          console.error(
+            "Error fetching fresh batch pools, trying cache:",
+            error
+          );
+          // Continue to try cache if online fetch fails
+        }
+      }
+
+      // Original caching logic for fallback or when offline
+      let cachedResults: Record<string, VotingPool> = {};
+      let uncachedIds: string[] = [];
+
+      if (!forceRefresh) {
         // Try to get each pool from cache
-        for (const id of ids) {
-          const cacheResult = cacheService.getVotingPoolById(id);
+        for (const poolId of ids) {
+          const cacheResult = await cacheService.getVotingPoolById(poolId);
           if (cacheResult.isCached && cacheResult.data) {
-            cachedResults[id] = cacheResult.data;
+            console.log(`Using cached pool ${poolId}`);
+            cachedResults[poolId] = cacheResult.data;
           } else {
-            uncachedIds.push(id);
+            uncachedIds.push(poolId);
           }
         }
 
@@ -807,16 +965,18 @@ export const votingPoolsApi = {
             ids.length - uncachedIds.length
           } pools, fetching ${uncachedIds.length} from API`
         );
-        ids = uncachedIds;
+      } else {
+        // If force refresh, fetch all IDs
+        uncachedIds = [...ids];
       }
 
-      // If no IDs to fetch, return empty object
-      if (ids.length === 0) {
-        return {};
+      // If no IDs to fetch, return just the cached results
+      if (uncachedIds.length === 0) {
+        return cachedResults;
       }
 
       // Fetch from API
-      const idsParam = ids.join(",");
+      const idsParam = uncachedIds.join(",");
       const response = await fetch(
         `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}`
       );
@@ -827,16 +987,19 @@ export const votingPoolsApi = {
         );
       }
 
-      const pools = (await response.json()) as VotingPool[];
+      const apiPools = (await response.json()) as APIVotingPool[];
       const result: Record<string, VotingPool> = {};
 
       // Add each pool to the result and update cache
-      pools.forEach((pool) => {
-        result[pool.id] = pool;
-        cacheService.setVotingPoolById(pool.id, pool);
-      });
+      for (const pool of apiPools) {
+        // Transform the API pool to app format (including proper voteCount)
+        const transformedPool = transformPoolData(pool);
+        result[pool.id] = transformedPool;
+        await cacheService.setVotingPoolById(pool.id, transformedPool);
+      }
 
-      return result;
+      // Return both newly fetched and cached results
+      return { ...cachedResults, ...result };
     } catch (error) {
       console.error("Error fetching batch voting pools:", error);
       return {};
@@ -846,33 +1009,50 @@ export const votingPoolsApi = {
 
 // Votes API functions
 export const votesApi = {
-  // Submit a vote
+  // Submit a vote with offline support
   async submitVote(poolId: string, optionId: string): Promise<Vote> {
-    const token = await getToken();
+    try {
+      // Import dynamically to avoid circular dependency
+      const { offlineVoteManager } = await import("./offlineVoteManager");
 
-    if (!token) {
-      throw new Error("Authentication required");
+      // Use the offline vote manager to handle the submission
+      // It will try online first, then fall back to offline if needed
+      const result = await offlineVoteManager.submitVote(poolId, optionId);
+
+      if (result.offline) {
+        console.log("Vote saved offline, will be synced when online");
+        // Return a partial vote object for offline votes
+        return {
+          id: result.voteId || "offline-vote",
+          poolId,
+          optionId,
+          timestamp: new Date().toISOString(),
+          userId: "current-user", // Placeholder
+        } as Vote;
+      } else {
+        console.log("Vote submitted online successfully");
+        // If we're here, the vote was submitted successfully online
+        // Let's fetch the user's votes to include this one
+        const votes = await this.getUserVotes();
+        const thisVote = votes.find((v) => v.poolId === poolId);
+
+        if (thisVote) {
+          return thisVote;
+        } else {
+          // Fallback if we couldn't find the specific vote
+          return {
+            id: "online-vote",
+            poolId,
+            optionId,
+            timestamp: new Date().toISOString(),
+            userId: "current-user", // Placeholder
+          } as Vote;
+        }
+      }
+    } catch (error) {
+      console.error("Error in votesApi.submitVote:", error);
+      throw new Error("Failed to submit vote");
     }
-
-    // Get auth headers and add content type for JSON
-    const headers = (await getAuthHeaders()) as Record<string, string>;
-    headers["Content-Type"] = "application/json";
-
-    console.log("Submitting vote with token for pool:", poolId);
-    const response = await fetch(`${API_BASE_URL}/api/votes`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ poolId, optionId }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to submit vote");
-    }
-
-    const data = await response.json();
-    console.log("Vote submitted successfully");
-    return data.vote;
   },
 
   // Get all votes for the current user
@@ -974,12 +1154,12 @@ export const resultsApi = {
   ): Promise<any[]> {
     // Check cache first unless force refresh is requested
     if (!forceRefresh) {
-      const cacheResult = cacheService.getUserVotedPools(status);
+      const cacheResult = await cacheService.getUserVotedPools(status);
       if (cacheResult.isCached && cacheResult.data.length > 0) {
         console.log(`Using cached user voted pools for status: ${status}`);
 
         // Return the cached pool IDs in the expected format
-        return cacheResult.data.map((id) => ({ poolId: id }));
+        return cacheResult.data.map((id: string) => ({ poolId: id }));
       }
     }
 
@@ -1032,10 +1212,10 @@ export const resultsApi = {
       console.error(`Error fetching user voted pools for ${status}:`, error);
 
       // Fall back to cache even if it's expired
-      const fallbackCache = cacheService.getUserVotedPools(status);
+      const fallbackCache = await cacheService.getUserVotedPools(status);
       if (fallbackCache.data.length > 0) {
         console.log(`Server error, using expired cache for ${status}`);
-        return fallbackCache.data.map((id) => ({ poolId: id }));
+        return fallbackCache.data.map((id: string) => ({ poolId: id }));
       }
 
       // If all else fails, return empty array

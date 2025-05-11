@@ -23,6 +23,7 @@ import { PoolSkeleton } from "../../components/PoolSkeleton";
 import { CustomModal } from "../../components/CustomModal";
 import { useModal } from "../../hooks/useModal";
 import { StatusBar } from "expo-status-bar";
+import { useRouter } from "expo-router";
 
 function groupPoolsByDate(pools: VotingPool[]) {
   const grouped: { [key: string]: VotingPool[] } = {};
@@ -57,27 +58,43 @@ const getCalendarPools = (allLoadedPools: VotingPool[], activeTab: TabType) => {
     return allLoadedPools.filter((pool) => pool.status === activeTab);
   }
 
-  // For "all" tab, prioritize active and upcoming pools, and limit total displayed
-  const active = allLoadedPools.filter((pool) => pool.status === "active");
-  const upcoming = allLoadedPools.filter((pool) => pool.status === "upcoming");
-  const closed = allLoadedPools.filter((pool) => pool.status === "closed");
+  // For "all" tab, prioritize showing the most recent and upcoming pools
+  // Filter to active and soon-to-start pools to avoid overcrowding the calendar
+  return allLoadedPools.filter((pool) => {
+    // Always include active pools
+    if (pool.status === "active") return true;
 
-  // Start with active and upcoming pools as they're more important
-  const priorityPools = [...active, ...upcoming];
+    // Include upcoming pools starting in the next 7 days
+    if (pool.status === "upcoming") {
+      const startDate = parseISO(pool.startDate);
+      const now = new Date();
+      const diffInDays = Math.floor(
+        (startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      return diffInDays <= 7;
+    }
 
-  // Limit closed pools to prevent calendar overflow
-  // If there are many active/upcoming pools, show fewer closed ones
-  const maxClosedPools = Math.max(5, 20 - priorityPools.length);
-  const selectedClosed = closed.slice(0, maxClosedPools);
+    // Include closed pools from the last 3 days
+    if (pool.status === "closed") {
+      const endDate = parseISO(pool.endDate);
+      const now = new Date();
+      const diffInDays = Math.floor(
+        (now.getTime() - endDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      return diffInDays <= 3;
+    }
 
-  return [...priorityPools, ...selectedClosed];
+    return false;
+  });
 };
 
 export default function CalendarPoolsScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const themeColors = Colors[isDark ? "dark" : "light"];
+  const router = useRouter();
 
+  const [allPoolsData, setAllPoolsData] = useState<VotingPool[]>([]); // Store all pools in one array
   const [allPoolIds, setAllPoolIds] = useState<string[]>([]);
   const [loadedPools, setLoadedPools] = useState<Record<string, VotingPool>>(
     {}
@@ -91,15 +108,11 @@ export default function CalendarPoolsScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
-  // Fetch pools from API with support for pagination
-  const fetchPools = async (
-    tabType: TabType = activeTab,
-    forceRefresh = false,
-    page = 1
-  ) => {
+  // Fetch pools from API - optimized to load all data at once
+  const fetchPools = async (forceRefresh = false, page = 1) => {
     try {
-      // Only show loading indicator on initial load or when forcing refresh on first page
       if (
         (Object.keys(loadedPools).length === 0 || forceRefresh) &&
         page === 1
@@ -108,71 +121,37 @@ export default function CalendarPoolsScreen() {
       }
 
       if (forceRefresh && page === 1) {
-        setLoadedPools({}); // Clear loaded pools only on forced refresh of first page
+        setLoadedPools({});
+        setAllPoolsData([]);
       }
 
-      let poolIds: string[] = [];
+      // Fetch active, upcoming, and closed pools in parallel
+      const [activePools, upcomingPools, closedPools] = await Promise.all([
+        votingPoolsApi.getActiveVotingPools(forceRefresh, page),
+        votingPoolsApi.getUpcomingVotingPools(forceRefresh, page),
+        votingPoolsApi.getClosedVotingPools(forceRefresh, page),
+      ]);
 
-      // Get pools based on tab type, with forceRefresh parameter and pagination
-      if (tabType === "all") {
-        // For "all" tab, we need to fetch all types with pagination and combine them
-        const activePools = await votingPoolsApi.getActiveVotingPools(
-          forceRefresh,
-          page
-        );
-        const upcomingPools = await votingPoolsApi.getUpcomingVotingPools(
-          forceRefresh,
-          page
-        );
-        const closedPools = await votingPoolsApi.getClosedVotingPools(
-          forceRefresh,
-          page
-        );
+      // Combine all the data
+      const allPools = [
+        ...activePools.data,
+        ...upcomingPools.data,
+        ...closedPools.data,
+      ];
 
-        // Combine data and calculate total pages as max of all three
-        const allPools = [
-          ...activePools.data,
-          ...upcomingPools.data,
-          ...closedPools.data,
-        ];
+      // Save all the IDs
+      const poolIds = allPools.map((pool) => pool.id);
 
-        poolIds = allPools.map((pool) => pool.id);
+      // Set total pages to the maximum of the three pool types
+      const maxTotalPages = Math.max(
+        activePools.pagination.totalPages,
+        upcomingPools.pagination.totalPages,
+        closedPools.pagination.totalPages
+      );
 
-        // Set total pages to the maximum of the three pool types
-        const maxTotalPages = Math.max(
-          activePools.pagination.totalPages,
-          upcomingPools.pagination.totalPages,
-          closedPools.pagination.totalPages
-        );
+      setTotalPages(maxTotalPages);
 
-        setTotalPages(maxTotalPages);
-      } else {
-        // For specific tabs, fetch just that type
-        let result;
-        if (tabType === "active") {
-          result = await votingPoolsApi.getActiveVotingPools(
-            forceRefresh,
-            page
-          );
-        } else if (tabType === "upcoming") {
-          result = await votingPoolsApi.getUpcomingVotingPools(
-            forceRefresh,
-            page
-          );
-        } else if (tabType === "closed") {
-          result = await votingPoolsApi.getClosedVotingPools(
-            forceRefresh,
-            page
-          );
-        }
-
-        if (result) {
-          poolIds = result.data.map((pool) => pool.id);
-          setTotalPages(result.pagination.totalPages);
-        }
-      }
-
-      // Update all pool IDs if this is first page or append if loading more
+      // Update all pool IDs
       if (page === 1) {
         setAllPoolIds(poolIds);
       } else {
@@ -185,27 +164,32 @@ export default function CalendarPoolsScreen() {
       if (poolIds.length === 0) {
         setLoading(false);
         setIsLoadingMore(false);
+        setInitialLoadComplete(true);
         return;
       }
 
-      console.log(`Fetching ${poolIds.length} pools details using batch API`);
+      // Convert array to record for faster lookup
+      const poolsRecord: Record<string, VotingPool> = {};
+      allPools.forEach((pool) => {
+        poolsRecord[pool.id] = pool;
+      });
 
-      // Use batch API to fetch all pools at once
-      const batchResults = await votingPoolsApi.getBatchVotingPools(
-        poolIds,
-        forceRefresh
-      );
-
-      // Update loaded pools - append to existing if loading more pages
+      // Update state
       if (page === 1) {
-        setLoadedPools(batchResults);
+        setLoadedPools(poolsRecord);
+        setAllPoolsData(allPools);
       } else {
-        setLoadedPools((prev) => ({ ...prev, ...batchResults }));
+        setLoadedPools((prev) => ({ ...prev, ...poolsRecord }));
+        setAllPoolsData((prev) => [
+          ...prev,
+          ...allPools.filter((pool) => !prev.some((p) => p.id === pool.id)),
+        ]);
       }
 
       setError(null);
       setLoading(false);
       setIsLoadingMore(false);
+      setInitialLoadComplete(true);
     } catch (err) {
       console.error("Error loading pools:", err);
       showModal({
@@ -216,77 +200,59 @@ export default function CalendarPoolsScreen() {
       });
       setAllPoolIds([]);
       setLoadedPools({});
+      setAllPoolsData([]);
       setLoading(false);
       setIsLoadingMore(false);
+      setInitialLoadComplete(true);
     }
   };
 
-  const filterPoolsByDate = (date: Date | null) => {
-    // When no date is selected, we don't need to filter
-    if (!date) return Object.values(loadedPools);
-
-    // Filter pools that are active on the selected date
-    return Object.values(loadedPools).filter((pool) => {
-      try {
-        const startDate = startOfDay(parseISO(pool.startDate));
-        const endDate = startOfDay(parseISO(pool.endDate));
-        const selectedDay = startOfDay(date);
-
-        // The pool is active on the selected date if the selected date
-        // falls between start and end dates (inclusive)
-        return (
-          (selectedDay >= startDate && selectedDay <= endDate) ||
-          isSameDay(selectedDay, startDate) ||
-          isSameDay(selectedDay, endDate)
-        );
-      } catch (error) {
-        console.error("Error filtering pool by date:", error, pool);
-        return false;
-      }
-    });
-  };
-
-  const handleDateSelect = (date: Date | null) => {
-    setSelectedDate(date);
-  };
-
-  // Load more function for pagination
-  const handleLoadMore = () => {
-    if (currentPage < totalPages && !isLoadingMore) {
-      setIsLoadingMore(true);
-      setCurrentPage((prev) => prev + 1);
-      fetchPools(activeTab, false, currentPage + 1);
+  // Filter pools by tab type - now computed with useMemo to avoid recalculations
+  const filteredPoolsByTab = useMemo(() => {
+    if (activeTab === "all") {
+      return allPoolsData;
     }
-  };
+    return allPoolsData.filter((pool) => pool.status === activeTab);
+  }, [allPoolsData, activeTab]);
 
-  useEffect(() => {
-    // When changing tabs, reset pagination and try to use cached data first
-    setCurrentPage(1);
-    fetchPools(activeTab, false, 1);
-  }, [activeTab]);
+  // Filter pools by date - also using useMemo
+  const filterPoolsByDate = useCallback(
+    (date: Date | null, pools: VotingPool[]) => {
+      // When no date is selected, we don't need to filter
+      if (!date) return pools;
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setCurrentPage(1);
-    // Force refresh from API on manual refresh
-    await fetchPools(activeTab, true, 1);
-    setRefreshing(false);
-  }, [activeTab]);
+      // Filter pools that are active on the selected date
+      return pools.filter((pool) => {
+        try {
+          const startDate = startOfDay(parseISO(pool.startDate));
+          const endDate = startOfDay(parseISO(pool.endDate));
+          const selectedDay = startOfDay(date);
 
-  const handleTabChange = (tab: TabType) => {
-    if (tab !== activeTab) {
-      setActiveTab(tab);
-      // Reset date filter when changing tabs
-      setSelectedDate(null);
-    }
-  };
+          // The pool is active on the selected date if the selected date
+          // falls between start and end dates (inclusive)
+          return (
+            (selectedDay >= startDate && selectedDay <= endDate) ||
+            isSameDay(selectedDay, startDate) ||
+            isSameDay(selectedDay, endDate)
+          );
+        } catch (error) {
+          console.error("Error filtering pool by date:", error, pool);
+          return false;
+        }
+      });
+    },
+    []
+  );
 
-  // Get filtered and sorted pools
-  const getFilteredPools = () => {
-    const poolsArray = filterPoolsByDate(selectedDate);
+  // Get filtered pools based on tab and date - also memoized
+  const getFilteredPools = useMemo(() => {
+    const dateFilteredPools = filterPoolsByDate(
+      selectedDate,
+      filteredPoolsByTab
+    );
 
     // Sort pools by date
-    return poolsArray.sort((a, b) => {
+    return dateFilteredPools.sort((a, b) => {
       // For upcoming and active pools, sort by start date
       // For closed pools, sort by end date
       const dateA =
@@ -301,14 +267,66 @@ export default function CalendarPoolsScreen() {
 
       return dateA - dateB;
     });
-  };
+  }, [filteredPoolsByTab, selectedDate, filterPoolsByDate]);
 
-  // Group pools by date
-  const groupedPools = groupPoolsByDate(getFilteredPools());
-  const dateKeys = Object.keys(groupedPools).sort((a, b) => {
-    // Sort by date (closest to today first)
-    return new Date(a).getTime() - new Date(b).getTime();
-  });
+  const handleDateSelect = useCallback((date: Date | null) => {
+    setSelectedDate(date);
+  }, []);
+
+  // Load more function for pagination
+  const handleLoadMore = useCallback(() => {
+    if (currentPage < totalPages && !isLoadingMore) {
+      setIsLoadingMore(true);
+      setCurrentPage((prev) => prev + 1);
+      fetchPools(false, currentPage + 1);
+    }
+  }, [currentPage, totalPages, isLoadingMore]);
+
+  // Load data only once when component mounts
+  useEffect(() => {
+    fetchPools(false, 1);
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setCurrentPage(1);
+    await fetchPools(true, 1);
+    setRefreshing(false);
+  }, []);
+
+  // Handle tab change - now just sets state without triggering API calls
+  const handleTabChange = useCallback(
+    (tab: TabType) => {
+      if (tab !== activeTab) {
+        setActiveTab(tab);
+        // Reset date filter when changing tabs
+        setSelectedDate(null);
+      }
+    },
+    [activeTab]
+  );
+
+  // Memoize grouped pools to avoid recalculation
+  const { groupedPools, dateKeys } = useMemo(() => {
+    const grouped = groupPoolsByDate(getFilteredPools);
+    const sortedKeys = Object.keys(grouped).sort((a, b) => {
+      return new Date(a).getTime() - new Date(b).getTime();
+    });
+    return { groupedPools: grouped, dateKeys: sortedKeys };
+  }, [getFilteredPools]);
+
+  // Memoize calendar pools to avoid recalculation
+  const calendarPools = useMemo(() => {
+    return getCalendarPools(allPoolsData, activeTab);
+  }, [allPoolsData, activeTab]);
+
+  // Function to navigate to the pool details screen
+  const handleOpenPool = useCallback(
+    (poolId: string) => {
+      router.push(`/pool/${poolId}`);
+    },
+    [router]
+  );
 
   const renderTabButton = (title: string, type: TabType) => {
     const isActive = activeTab === type;
@@ -409,10 +427,7 @@ export default function CalendarPoolsScreen() {
     }
 
     // If there are no pools after filtering
-    if (
-      Object.keys(loadedPools).length > 0 &&
-      getFilteredPools().length === 0
-    ) {
+    if (Object.keys(loadedPools).length > 0 && getFilteredPools.length === 0) {
       return (
         <View
           style={[
@@ -531,7 +546,7 @@ export default function CalendarPoolsScreen() {
 
               {/* Pool cards - now as a flat list without nesting */}
               {groupedPools[dateKey].map((pool: VotingPool) => (
-                <View
+                <TouchableOpacity
                   key={pool.id}
                   style={[
                     styles.poolCard,
@@ -540,6 +555,8 @@ export default function CalendarPoolsScreen() {
                       shadowOpacity: isDark ? 0.3 : 0.1,
                     },
                   ]}
+                  activeOpacity={0.7}
+                  onPress={() => handleOpenPool(pool.id)}
                 >
                   {/* Category color indicator */}
                   <View
@@ -681,7 +698,7 @@ export default function CalendarPoolsScreen() {
                       </View>
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           );
@@ -691,12 +708,7 @@ export default function CalendarPoolsScreen() {
   };
 
   const renderContent = () => {
-    // Get all loaded pools as an array
-    const allLoadedPools = Object.values(loadedPools);
-
-    // Use the extracted function instead of useMemo
-    const calendarPools = getCalendarPools(allLoadedPools, activeTab);
-
+    // Use the memoized calendar pools instead of calculating them again
     return (
       <ScrollView
         style={{ flex: 1, backgroundColor: themeColors.background }}
@@ -739,7 +751,7 @@ export default function CalendarPoolsScreen() {
           ]}
         >
           <PoolCalendar
-            pools={calendarPools} // Use the filtered pools for the calendar view
+            pools={calendarPools} // Use the memoized pools
             onDateSelect={handleDateSelect}
             selectedDate={selectedDate}
             disabled={loading && allPoolIds.length === 0}
@@ -747,7 +759,7 @@ export default function CalendarPoolsScreen() {
 
           {/* Additional note when "Todas" is selected and pools are limited */}
           {activeTab === "all" &&
-            allLoadedPools.length > calendarPools.length && (
+            allPoolsData.length > calendarPools.length && (
               <View style={styles.calendarNote}>
                 <Text
                   style={{
@@ -765,7 +777,7 @@ export default function CalendarPoolsScreen() {
             )}
 
           {/* Category legend inside calendar container */}
-          {!loading && allLoadedPools.length > 0 && (
+          {!loading && allPoolsData.length > 0 && (
             <View
               style={[
                 styles.legendContainer,
@@ -788,7 +800,7 @@ export default function CalendarPoolsScreen() {
                   .filter(
                     ([key]) =>
                       key !== "default" &&
-                      allLoadedPools.some((pool) => pool.category === key)
+                      allPoolsData.some((pool) => pool.category === key)
                   )
                   .map(([category, color]) => (
                     <View key={category} style={styles.legendItem}>
@@ -868,7 +880,7 @@ export default function CalendarPoolsScreen() {
           </View>
         )}
 
-        {loading && allPoolIds.length === 0 ? (
+        {loading && !initialLoadComplete ? (
           <View
             style={[
               styles.listLoadingContainer,

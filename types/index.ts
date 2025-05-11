@@ -15,6 +15,7 @@ export interface VotingPool {
   description: string;
   category: string;
   imageData?: string; // Base64 encoded image data
+  hasImage?: boolean; // Flag to indicate image exists but is not included in storage
   startDate: string; // ISO date string
   endDate: string; // ISO date string
   options: VotingOption[];
@@ -32,6 +33,7 @@ export interface VotingOption {
   text: string;
   description?: string;
   imageData?: string; // Base64 encoded image data
+  hasImage?: boolean; // Flag to indicate image exists but is not included in storage
   voteCount: number;
 }
 
