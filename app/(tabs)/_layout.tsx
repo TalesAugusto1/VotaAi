@@ -1,4 +1,4 @@
-import { FontAwesome5, Ionicons } from "@expo/vector-icons";
+import { FontAwesome5, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Tabs, router } from "expo-router";
 import React, { useEffect } from "react";
 import { Platform, useColorScheme } from "react-native";
@@ -46,6 +46,17 @@ export default function TabLayout() {
             <FontAwesome5 name="vote-yea" size={24} color={color} />
           ),
           tabBarLabel: "Votações",
+        }}
+      />
+
+      <Tabs.Screen
+        name="calendar-pools"
+        options={{
+          title: "Calendário",
+          tabBarIcon: ({ color }) => (
+            <MaterialIcons name="event" size={24} color={color} />
+          ),
+          tabBarLabel: "Calendário",
         }}
       />
 

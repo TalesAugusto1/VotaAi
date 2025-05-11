@@ -1,6 +1,7 @@
 import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import { User, Vote, VotingOption, VotingPool } from "../types";
+import { cacheService } from "./cacheService";
 
 // API base URL
 const API_BASE_URL = "http://192.168.15.15:3000";
@@ -79,13 +80,38 @@ function hasAuthHeader(headers: HeadersInit): boolean {
 
 // Helper to check if response is OK
 async function handleResponse<T>(response: Response): Promise<T> {
-  const data = await response.json();
-
+  // Check if response is OK first
   if (!response.ok) {
-    throw new Error(data.message || "An error occurred");
+    // Try to get JSON error message
+    try {
+      const errorData = await response.json();
+      throw new Error(errorData.message || `API error: ${response.status}`);
+    } catch (jsonError) {
+      // If JSON parsing fails, try to get text
+      try {
+        const textError = await response.text();
+        throw new Error(textError || `API error: ${response.status}`);
+      } catch (textError) {
+        // If all else fails, use status code
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+    }
   }
 
-  return data;
+  // Check content type to make sure we're getting JSON
+  const contentType = response.headers.get("content-type");
+  if (!contentType || !contentType.includes("application/json")) {
+    throw new Error("Server returned non-JSON response");
+  }
+
+  // Try to parse JSON
+  try {
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("JSON parse error:", error);
+    throw new Error("Failed to parse server response as JSON");
+  }
 }
 
 // Transform API pool to app pool
@@ -378,8 +404,27 @@ export const authApi = {
 export const votingPoolsApi = {
   // Get all voting pools
   async getVotingPools(
-    status?: "active" | "upcoming" | "closed"
+    status?: "active" | "upcoming" | "closed",
+    forceRefresh = false
   ): Promise<VotingPool[]> {
+    // If we have a specific status, try to get from cache first
+    if (status && !forceRefresh) {
+      let cacheResult;
+      if (status === "active") {
+        cacheResult = cacheService.getActiveVotingPools();
+      } else if (status === "upcoming") {
+        cacheResult = cacheService.getUpcomingVotingPools();
+      } else if (status === "closed") {
+        cacheResult = cacheService.getClosedVotingPools();
+      }
+
+      if (cacheResult && cacheResult.isCached && cacheResult.data.length > 0) {
+        console.log(`Using cached ${status} voting pools`);
+        return cacheResult.data;
+      }
+    }
+
+    // If not cached or force refresh, fetch from API
     let url = `${API_BASE_URL}/api/voting-pools`;
 
     if (status) {
@@ -387,31 +432,54 @@ export const votingPoolsApi = {
     }
 
     const response = await fetch(url);
-
     const data = await handleResponse<APIVotingPool[]>(response);
 
     // Transform API response to match app data structure
-    return data.map(transformPoolData);
+    const transformedData = data.map(transformPoolData);
+
+    // Update cache based on status
+    if (status === "active") {
+      cacheService.setActiveVotingPools(transformedData);
+    } else if (status === "upcoming") {
+      cacheService.setUpcomingVotingPools(transformedData);
+    } else if (status === "closed") {
+      cacheService.setClosedVotingPools(transformedData);
+    }
+
+    return transformedData;
   },
 
   // Get active voting pools
-  async getActiveVotingPools(): Promise<VotingPool[]> {
-    return this.getVotingPools("active");
+  async getActiveVotingPools(forceRefresh = false): Promise<VotingPool[]> {
+    return this.getVotingPools("active", forceRefresh);
   },
 
   // Get upcoming voting pools
-  async getUpcomingVotingPools(): Promise<VotingPool[]> {
-    return this.getVotingPools("upcoming");
+  async getUpcomingVotingPools(forceRefresh = false): Promise<VotingPool[]> {
+    return this.getVotingPools("upcoming", forceRefresh);
   },
 
   // Get closed voting pools
-  async getClosedVotingPools(): Promise<VotingPool[]> {
-    return this.getVotingPools("closed");
+  async getClosedVotingPools(forceRefresh = false): Promise<VotingPool[]> {
+    return this.getVotingPools("closed", forceRefresh);
   },
 
   // Get a voting pool by ID
-  async getVotingPoolById(id: string): Promise<VotingPool | null> {
+  async getVotingPoolById(
+    id: string,
+    forceRefresh = false
+  ): Promise<VotingPool | null> {
     try {
+      // Check cache first unless force refresh is requested
+      if (!forceRefresh) {
+        const cacheResult = cacheService.getVotingPoolById(id);
+        if (cacheResult.isCached && cacheResult.data) {
+          console.log(`Using cached pool ${id}`);
+          return cacheResult.data;
+        }
+      }
+
+      // Fetch from API if not cached or force refresh
       const response = await fetch(`${API_BASE_URL}/api/voting-pools/${id}`);
 
       if (!response.ok) {
@@ -424,7 +492,12 @@ export const votingPoolsApi = {
       const pool = (await response.json()) as APIVotingPool;
 
       // Transform API response to match app data structure
-      return transformPoolData(pool);
+      const transformedPool = transformPoolData(pool);
+
+      // Update the cache
+      cacheService.setVotingPoolById(id, transformedPool);
+
+      return transformedPool;
     } catch (error) {
       console.error("Get voting pool error:", error);
       return null;
@@ -617,6 +690,13 @@ export const votingPoolsApi = {
       throw error;
     }
   },
+
+  // Method to invalidate cache after actions that modify data
+  invalidatePoolsCache(
+    type: "active" | "upcoming" | "closed" | "all" = "all"
+  ): void {
+    cacheService.invalidateCache(type);
+  },
 };
 
 // Votes API functions
@@ -742,70 +822,90 @@ export const resultsApi = {
     return await handleResponse(response);
   },
 
-  // Get results for all pools the user has voted in
-  async getUserVotedPoolsResults(status?: "active" | "closed"): Promise<
-    {
-      poolId: string;
-      title: string;
-      status: "active" | "closed";
-      totalVotes: number;
-      results: {
-        id: string;
-        text: string;
-        voteCount: number;
-        percentage: number;
-      }[];
-    }[]
-  > {
-    try {
-      console.log(
-        "Fetching results with token:",
-        (await getToken()) ? "Present" : "Missing"
-      );
+  // Get results for pools the user has voted in
+  async getUserVotedPoolsResults(
+    status: "active" | "closed" = "active",
+    forceRefresh = false
+  ): Promise<any[]> {
+    // Check cache first unless force refresh is requested
+    if (!forceRefresh) {
+      const cacheResult = cacheService.getUserVotedPools(status);
+      if (cacheResult.isCached && cacheResult.data.length > 0) {
+        console.log(`Using cached user voted pools for status: ${status}`);
 
-      const token = await getToken();
-      if (!token) {
-        console.log("No authentication token found for results");
-        return []; // Return empty array instead of throwing error
+        // Return the cached pool IDs in the expected format
+        return cacheResult.data.map((id) => ({ poolId: id }));
       }
+    }
 
-      let url = `${API_BASE_URL}/api/results/pools`;
-      if (status) {
-        url += `?status=${status}`;
-      }
-
-      console.log("Fetching results from URL:", url);
-
-      // Create headers manually for more control
-      const headers: Record<string, string> = {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      };
-
-      console.log(
-        "Fetching results with token:",
-        token ? "Present" : "Missing"
-      );
-
-      const response = await fetch(url, {
-        headers,
-      });
-
-      console.log("Fetching results response status:", response.status);
-
-      if (!response.ok) {
-        console.error("Error fetching results:", response.status);
-        throw new Error(
-          `Failed to fetch results. Server returned status ${response.status}`
-        );
-      }
-
-      const data = await response.json();
-      console.log("Results fetched successfully");
-      return data;
-    } catch (error) {
-      console.error("Get user voted pools results error:", error);
+    // If not cached or forceRefresh, fetch from API
+    const token = await getToken();
+    if (!token) {
       return [];
+    }
+
+    try {
+      const headers = await getAuthHeaders();
+      // Fix the API endpoint path to match the backend route
+      const response = await fetch(
+        `${API_BASE_URL}/api/results/user-voted?status=${status}`,
+        { headers }
+      );
+
+      // Check for non-200 responses
+      if (!response.ok) {
+        console.error(`API error: ${response.status} ${response.statusText}`);
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      // Check content type to make sure we're getting JSON
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        // Try to read the response as text for debugging
+        const textResponse = await response.text();
+        console.error("Non-JSON response:", textResponse.substring(0, 200));
+        throw new Error("Server returned non-JSON response");
+      }
+
+      // Safe JSON parsing
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error("JSON parse error:", jsonError);
+        throw new Error("Failed to parse server response as JSON");
+      }
+
+      // Update cache with the pool IDs
+      if (data && Array.isArray(data)) {
+        const poolIds = data.map((item) => item.poolId);
+        cacheService.setUserVotedPools(status, poolIds);
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error(`Error fetching user voted pools for ${status}:`, error);
+
+      // Fall back to cache even if it's expired
+      const fallbackCache = cacheService.getUserVotedPools(status);
+      if (fallbackCache.data.length > 0) {
+        console.log(`Server error, using expired cache for ${status}`);
+        return fallbackCache.data.map((id) => ({ poolId: id }));
+      }
+
+      // If all else fails, return empty array
+      return [];
+    }
+  },
+
+  // Invalidate user voted pools cache
+  invalidateUserVotedPoolsCache(
+    type: "active" | "closed" | "all" = "all"
+  ): void {
+    if (type === "all") {
+      cacheService.invalidateCache("all");
+    } else {
+      cacheService.invalidateCache(type);
     }
   },
 };

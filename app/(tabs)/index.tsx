@@ -40,22 +40,30 @@ export default function HomeScreen() {
   // Check if user is admin (role = 2)
   const isAdmin = user?.role === 2;
 
-  const fetchVotingPools = async () => {
+  const fetchVotingPools = async (forceRefresh = false) => {
     try {
-      setIsLoading(true);
-      setLoadedPools({});
+      // Only show loading state on initial load or forced refresh
+      if (Object.keys(loadedPools).length === 0 || forceRefresh) {
+        setIsLoading(true);
+      }
 
-      // First, get the list of all pool IDs
-      const pools = await votingPoolsApi.getActiveVotingPools();
+      if (forceRefresh) {
+        setLoadedPools({});
+      }
+
+      // First, get the list of all pool IDs with the forceRefresh parameter
+      const pools = await votingPoolsApi.getActiveVotingPools(forceRefresh);
 
       // Set the IDs to render skeleton placeholders
       setAllPoolIds(pools.map((pool) => pool.id));
 
-      // Now fetch each pool individually to allow for independent loading
+      // For each pool ID, either load from cache or fetch
       pools.forEach(async (basicPool) => {
         try {
-          // In a real implementation, you might want to fetch more details here
-          const pool = await votingPoolsApi.getVotingPoolById(basicPool.id);
+          const pool = await votingPoolsApi.getVotingPoolById(
+            basicPool.id,
+            forceRefresh
+          );
 
           if (pool) {
             // Add this pool to the loaded pools
@@ -92,13 +100,14 @@ export default function HomeScreen() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchVotingPools();
+    // Pass true to force refresh from API instead of cache
+    await fetchVotingPools(true);
     setRefreshing(false);
   };
 
-  // Fetch pools on initial load
+  // Fetch pools on initial load - don't force refresh
   useEffect(() => {
-    fetchVotingPools();
+    fetchVotingPools(false);
   }, []);
 
   // Also fetch pools when the refresh parameter changes
@@ -111,7 +120,8 @@ export default function HomeScreen() {
         type: "success",
       });
 
-      fetchVotingPools();
+      // Force refresh after pool creation
+      fetchVotingPools(true);
     }
   }, [shouldRefresh, refreshTimestamp]);
 

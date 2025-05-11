@@ -20,19 +20,6 @@ import { CustomModal } from "../../components/CustomModal";
 import { useModal } from "../../hooks/useModal";
 import { PoolSkeleton } from "../../components/PoolSkeleton";
 
-interface PoolResult {
-  poolId: string;
-  title: string;
-  status: "active" | "closed";
-  totalVotes: number;
-  results: {
-    id: string;
-    text: string;
-    voteCount: number;
-    percentage: number;
-  }[];
-}
-
 export default function ResultsScreen() {
   const [allPoolIds, setAllPoolIds] = useState<string[]>([]);
   const [loadedPools, setLoadedPools] = useState<Record<string, VotingPool>>(
@@ -40,24 +27,48 @@ export default function ResultsScreen() {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"active" | "closed">("active");
   const { user } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const { visible, options, showModal, hideModal, showErrorModal } = useModal();
 
-  const fetchVotedPools = async () => {
+  const fetchVotedPools = async (forceRefresh = false) => {
     if (!user) return;
 
     try {
-      setIsLoading(true);
-      setLoadedPools({}); // Clear loaded pools
+      // Only show loading on initial load or forced refresh
+      if (Object.keys(loadedPools).length === 0 || forceRefresh) {
+        setIsLoading(true);
+      }
+
+      if (forceRefresh) {
+        setLoadedPools({}); // Clear loaded pools only when forcing refresh
+      }
+
+      // Reset error state on new fetch
+      setErrorMessage(null);
 
       console.log("Fetching voted pools for status:", activeTab);
 
-      // Get user voted pools results
-      const poolResults = await resultsApi.getUserVotedPoolsResults(activeTab);
-      console.log("Received pool results:", poolResults?.length || 0);
+      // Get user voted pools results with proper error handling
+      let poolResults = [];
+      try {
+        poolResults = await resultsApi.getUserVotedPoolsResults(
+          activeTab,
+          forceRefresh
+        );
+        console.log("Received pool results:", poolResults?.length || 0);
+      } catch (apiError: any) {
+        console.error("API error fetching voted pools:", apiError);
+        setErrorMessage(
+          "Não foi possível carregar as votações. Servidor indisponível."
+        );
+        setAllPoolIds([]);
+        setIsLoading(false);
+        return;
+      }
 
       if (!poolResults || poolResults.length === 0) {
         setAllPoolIds([]);
@@ -71,14 +82,14 @@ export default function ResultsScreen() {
 
       console.log("Pool IDs to fetch:", poolIds);
 
-      // Fetch each pool individually
+      // Fetch each pool individually, using cache when possible
+      let loadedCount = 0;
+      const totalToLoad = poolIds.length;
+
       poolIds.forEach(async (id) => {
         try {
-          // Add a small random delay to simulate variable network conditions
-          const randomDelay = Math.floor(Math.random() * 800) + 200; // 200-1000ms
-          await new Promise((resolve) => setTimeout(resolve, randomDelay));
-
-          const pool = await votingPoolsApi.getVotingPoolById(id);
+          // Get pool with forceRefresh parameter
+          const pool = await votingPoolsApi.getVotingPoolById(id, forceRefresh);
 
           if (pool) {
             // Sort options by vote count
@@ -95,15 +106,31 @@ export default function ResultsScreen() {
               [id]: sortedPool,
             }));
           }
+
+          // Track loaded pools to set loading to false when all are done
+          loadedCount++;
+          if (loadedCount >= totalToLoad) {
+            setIsLoading(false);
+          }
         } catch (error) {
           console.error(`Error loading pool ${id}:`, error);
+          // Track failed loads too
+          loadedCount++;
+          if (loadedCount >= totalToLoad) {
+            setIsLoading(false);
+          }
         }
       });
 
-      // Set loading to false now that we've started loading all pools
-      setIsLoading(false);
-    } catch (error) {
+      // Set a safety timeout to ensure loading state is removed even if some requests fail
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 10000); // 10 second safety timeout
+    } catch (error: any) {
       console.error("Error fetching voted pools:", error);
+      setErrorMessage(
+        "Falha ao carregar votações. Tente novamente mais tarde."
+      );
 
       // Use the new error handling system
       if (error.response?.status === 429) {
@@ -119,12 +146,14 @@ export default function ResultsScreen() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchVotedPools();
+    // Force refresh from API on manual refresh
+    await fetchVotedPools(true);
     setRefreshing(false);
   };
 
   useEffect(() => {
-    fetchVotedPools();
+    // Use cached data first
+    fetchVotedPools(false);
   }, [user, activeTab]);
 
   const renderEmptyComponent = () => {
@@ -137,6 +166,23 @@ export default function ResultsScreen() {
               <PoolSkeleton key={index} index={index} />
             )
           )}
+        </View>
+      );
+    }
+
+    // If there's an error message, show it
+    if (errorMessage) {
+      return (
+        <View style={styles.centerContainer}>
+          <ThemedText style={styles.errorText}>{errorMessage}</ThemedText>
+          <TouchableOpacity
+            style={[styles.retryButton, { backgroundColor: Colors.light.tint }]}
+            onPress={() => fetchVotedPools(true)}
+          >
+            <ThemedText style={styles.retryButtonText}>
+              Tentar Novamente
+            </ThemedText>
+          </TouchableOpacity>
         </View>
       );
     }
@@ -307,6 +353,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
     opacity: 0.7,
+  },
+  errorText: {
+    fontSize: 16,
+    textAlign: "center",
+    color: "#E53935",
+    marginBottom: 16,
+  },
+  retryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
   },
   skeletonContainer: {
     flex: 1,
