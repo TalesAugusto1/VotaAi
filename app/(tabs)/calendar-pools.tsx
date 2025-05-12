@@ -166,6 +166,10 @@ export default function CalendarPoolsScreen() {
     new Animated.Value(selectedCategory ? 1 : 0)
   ).current;
 
+  // Add animation values for tab description and calendar note
+  const tabDescriptionAnim = useRef(new Animated.Value(0)).current;
+  const calendarNoteAnim = useRef(new Animated.Value(0)).current;
+
   // Update animation when selected category changes
   useEffect(() => {
     // Different configurations for opening and closing animations
@@ -441,16 +445,33 @@ export default function CalendarPoolsScreen() {
     setRefreshing(false);
   }, []);
 
-  // Handle tab change - now just sets state without triggering API calls
+  // Handle tab change - now with animation
   const handleTabChange = useCallback(
     (tab: TabType) => {
       if (tab !== activeTab) {
         setActiveTab(tab);
         // Reset date filter when changing tabs
         setSelectedDate(null);
+
+        // Animate tab description visibility
+        if (tab === "all") {
+          // Hide the description for "Todas" tab
+          Animated.timing(tabDescriptionAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: false,
+          }).start();
+        } else {
+          // Show description for other tabs
+          Animated.timing(tabDescriptionAnim, {
+            toValue: 1,
+            duration: 250,
+            useNativeDriver: false,
+          }).start();
+        }
       }
     },
-    [activeTab]
+    [activeTab, tabDescriptionAnim]
   );
 
   // Add function to handle category selection
@@ -458,15 +479,6 @@ export default function CalendarPoolsScreen() {
     setSelectedCategory((prev) => (prev === category ? null : category));
     setShowCategoryModal(false); // Close modal after selection
   }, []);
-
-  // Memoize grouped pools to avoid recalculation
-  const { groupedPools, dateKeys } = useMemo(() => {
-    const grouped = groupPoolsByDate(getFilteredPools);
-    const sortedKeys = Object.keys(grouped).sort((a, b) => {
-      return new Date(a).getTime() - new Date(b).getTime();
-    });
-    return { groupedPools: grouped, dateKeys: sortedKeys };
-  }, [getFilteredPools]);
 
   // Memoize calendar pools to use the filtered pools instead of all pools
   const calendarPools = useMemo(() => {
@@ -489,6 +501,26 @@ export default function CalendarPoolsScreen() {
     getFilteredPools,
   ]);
 
+  // Update calendar note animation when tab changes or pools are filtered
+  useEffect(() => {
+    // Show note when "Todas" is selected and there are more pools than shown in calendar
+    if (activeTab === "all" && allPoolsData.length > calendarPools.length) {
+      Animated.timing(calendarNoteAnim, {
+        toValue: 1,
+        duration: 300,
+        delay: 100, // Slight delay for better UX
+        useNativeDriver: false,
+      }).start();
+    } else {
+      // Hide note otherwise
+      Animated.timing(calendarNoteAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [activeTab, allPoolsData.length, calendarPools.length, calendarNoteAnim]);
+
   // Function to navigate to the pool details screen
   const handleOpenPool = useCallback(
     (poolId: string) => {
@@ -496,6 +528,15 @@ export default function CalendarPoolsScreen() {
     },
     [router]
   );
+
+  // Memoize grouped pools to avoid recalculation
+  const { groupedPools, dateKeys } = useMemo(() => {
+    const grouped = groupPoolsByDate(getFilteredPools);
+    const sortedKeys = Object.keys(grouped).sort((a, b) => {
+      return new Date(a).getTime() - new Date(b).getTime();
+    });
+    return { groupedPools: grouped, dateKeys: sortedKeys };
+  }, [getFilteredPools]);
 
   const renderTabButton = (title: string, type: TabType) => {
     const isActive = activeTab === type;
@@ -1391,45 +1432,48 @@ export default function CalendarPoolsScreen() {
         scrollEventThrottle={400}
       >
         {/* Calendar container with subtle shadow */}
-        <View
+
+        <PoolCalendar
+          pools={calendarPools} // Use the memoized pools
+          onDateSelect={handleDateSelect}
+          selectedDate={selectedDate}
+          disabled={loading && allPoolIds.length === 0}
+        />
+
+        {/* Animated calendar note */}
+        <Animated.View
           style={[
-            styles.calendarContainer,
+            styles.calendarNote,
             {
-              backgroundColor: isDark
-                ? "rgba(36, 38, 45, 0.95)"
-                : "rgba(248, 249, 250, 0.9)",
-              borderColor: isDark
-                ? "rgba(255, 255, 255, 0.1)"
-                : "rgba(0, 0, 0, 0.04)",
+              opacity: calendarNoteAnim,
+              maxHeight: calendarNoteAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 40],
+              }),
+              transform: [
+                {
+                  translateY: calendarNoteAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-5, 0],
+                  }),
+                },
+              ],
             },
           ]}
         >
-          <PoolCalendar
-            pools={calendarPools} // Use the memoized pools
-            onDateSelect={handleDateSelect}
-            selectedDate={selectedDate}
-            disabled={loading && allPoolIds.length === 0}
-          />
-
-          {/* Additional note when "Todas" is selected and pools are limited */}
-          {activeTab === "all" &&
-            allPoolsData.length > calendarPools.length && (
-              <View style={styles.calendarNote}>
-                <Text
-                  style={{
-                    color: themeColors.text,
-                    fontSize: 12,
-                    fontStyle: "italic",
-                    opacity: 0.7,
-                    textAlign: "center",
-                  }}
-                >
-                  Mostrando votações prioritárias no calendário. Utilize os
-                  filtros para ver mais detalhes.
-                </Text>
-              </View>
-            )}
-        </View>
+          <Text
+            style={{
+              color: themeColors.text,
+              fontSize: 12,
+              fontStyle: "italic",
+              opacity: 0.7,
+              textAlign: "center",
+            }}
+          >
+            Mostrando votações prioritárias no calendário. Utilize os filtros
+            para ver mais detalhes.
+          </Text>
+        </Animated.View>
 
         {/* Category filter - moved above tab filters */}
         {renderCategoryFilter()}
@@ -1447,22 +1491,34 @@ export default function CalendarPoolsScreen() {
             {renderTabButton("Futuras", "upcoming")}
             {renderTabButton("Encerradas", "closed")}
           </View>
-          <View style={styles.activeTabDetails}>
-            {activeTab !== "all" && (
-              <Text
-                style={[
-                  styles.activeTabDescription,
-                  { color: themeColors.text },
-                ]}
-              >
-                {activeTab === "active"
-                  ? "Mostrando votações em andamento"
-                  : activeTab === "upcoming"
-                  ? "Mostrando votações agendadas para o futuro"
-                  : "Mostrando votações já encerradas"}
-              </Text>
-            )}
-          </View>
+          <Animated.View
+            style={[
+              styles.activeTabDetails,
+              {
+                maxHeight: tabDescriptionAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 40],
+                }),
+                opacity: tabDescriptionAnim,
+                overflow: "hidden",
+                borderTopWidth: tabDescriptionAnim.interpolate({
+                  inputRange: [0, 0.5, 1],
+                  outputRange: [0, 0, 1],
+                }),
+                borderTopColor: "rgba(0,0,0,0.05)",
+              },
+            ]}
+          >
+            <Text
+              style={[styles.activeTabDescription, { color: themeColors.text }]}
+            >
+              {activeTab === "active"
+                ? "Mostrando votações em andamento"
+                : activeTab === "upcoming"
+                ? "Mostrando votações agendadas para o futuro"
+                : "Mostrando votações já encerradas"}
+            </Text>
+          </Animated.View>
         </View>
 
         {/* Selected date indicator */}
