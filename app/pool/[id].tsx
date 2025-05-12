@@ -21,9 +21,10 @@ import { VotingPool } from "../../types";
 import { formatDate, isVotingPoolActive } from "../../utils/helpers";
 import { CustomModal } from "../../components/CustomModal";
 import { useModal } from "../../hooks/useModal";
+import { PoolAnalytics } from "../../components/PoolAnalytics";
 
 export default function VotingPoolDetailScreen() {
-  const { id } = useLocalSearchParams();
+  const { id, analytics } = useLocalSearchParams();
   const router = useRouter();
   const { user } = useAuth();
   const colorScheme = useColorScheme();
@@ -45,6 +46,9 @@ export default function VotingPoolDetailScreen() {
   // Calculate total votes
   const totalVotes =
     votingPool?.options.reduce((sum, option) => sum + option.voteCount, 0) || 0;
+
+  // Check if we should show the analytics view (for admins only)
+  const showAnalytics = isAdmin && analytics === "true";
 
   useEffect(() => {
     const fetchVotingPool = async () => {
@@ -291,6 +295,53 @@ export default function VotingPoolDetailScreen() {
   };
 
   const status = getStatusInfo();
+
+  // Show analytics view for admin users when analytics flag is present
+  if (showAnalytics) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: isDark
+              ? Colors.dark.background
+              : Colors.light.background,
+          },
+        ]}
+      >
+        <StatusBar style={isDark ? "light" : "dark"} />
+
+        <View style={styles.analyticsHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+          >
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color={isDark ? Colors.dark.text : Colors.light.text}
+            />
+          </TouchableOpacity>
+          <ThemedText style={styles.headerTitle}>Análise Detalhada</ThemedText>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <View style={styles.analyticsContainer}>
+          <PoolAnalytics pool={votingPool} />
+        </View>
+
+        <CustomModal
+          visible={visible}
+          title={options.title || ""}
+          message={options.message}
+          type={options.type}
+          onClose={hideModal}
+          actions={options.actions}
+        />
+      </View>
+    );
+  }
 
   return (
     <View
@@ -584,6 +635,21 @@ const styles = StyleSheet.create({
   headerContainer: {
     position: "relative",
   },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0, 0, 0, 0.1)",
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    flex: 1,
+    textAlign: "center",
+  },
   headerImage: {
     height: 250,
     width: "100%",
@@ -760,5 +826,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     marginLeft: 8,
+  },
+  analyticsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    marginTop: 8,
+    zIndex: 10,
+  },
+  analyticsContainer: {
+    flex: 1,
+    paddingTop: 8,
   },
 });
