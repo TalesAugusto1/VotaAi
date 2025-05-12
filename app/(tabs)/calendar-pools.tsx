@@ -28,24 +28,39 @@ import { useRouter } from "expo-router";
 function groupPoolsByDate(pools: VotingPool[]) {
   const grouped: { [key: string]: VotingPool[] } = {};
   pools.forEach((pool) => {
-    // Use start date for upcoming and active, end date for closed
-    const dateToUse =
-      pool.status === "closed"
-        ? parseISO(pool.endDate)
-        : parseISO(pool.startDate);
+    try {
+      // Use start date for upcoming and active, end date for closed
+      // Add null checks to prevent accessing properties of undefined
+      const startDate = pool.startDate ? parseISO(pool.startDate) : new Date();
+      const endDate = pool.endDate ? parseISO(pool.endDate) : new Date();
 
-    const key = format(dateToUse, "yyyy-MM-dd");
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(pool);
+      const dateToUse = pool.status === "closed" ? endDate : startDate;
+
+      const key = format(dateToUse, "yyyy-MM-dd");
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(pool);
+    } catch (error) {
+      console.error("Error grouping pool by date:", error, pool);
+      // Skip this pool if there's an error
+    }
   });
   return grouped;
 }
 
 function getDateParts(dateString: string) {
-  const date = parseISO(dateString);
-  const day = format(date, "d", { locale: ptBR });
-  const month = format(date, "MMMM", { locale: ptBR });
-  return { day, month };
+  try {
+    if (!dateString) {
+      // Return default values if dateString is undefined or empty
+      return { day: "--", month: "----" };
+    }
+    const date = parseISO(dateString);
+    const day = format(date, "d", { locale: ptBR });
+    const month = format(date, "MMMM", { locale: ptBR });
+    return { day, month };
+  } catch (error) {
+    console.error("Error parsing date:", error, dateString);
+    return { day: "--", month: "----" };
+  }
 }
 
 type TabType = "all" | "active" | "upcoming" | "closed";
@@ -88,6 +103,26 @@ const getCalendarPools = (allLoadedPools: VotingPool[], activeTab: TabType) => {
   });
 };
 
+// We'll use a more focused approach to get colors for categories
+const getCategoriesWithColors = (pools: VotingPool[]) => {
+  const categories: Record<string, string> = {};
+
+  // Get unique categories from pools
+  const uniqueCategories = Array.from(
+    new Set(pools.map((pool) => pool.category))
+  ).filter(Boolean);
+
+  // Get color for each category using the same function that colors the pools
+  uniqueCategories.forEach((category) => {
+    // Create a dummy pool with just this category
+    const dummyPool = { category } as VotingPool;
+    // Use the same getPoolColor function that's used in the calendar and pool cards
+    categories[category] = getPoolColor(dummyPool);
+  });
+
+  return categories;
+};
+
 export default function CalendarPoolsScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
@@ -104,11 +139,15 @@ export default function CalendarPoolsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>("all");
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const { visible, options, showModal, hideModal } = useModal();
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [dynamicCategoryColors, setDynamicCategoryColors] = useState<
+    Record<string, string>
+  >({});
 
   // Fetch pools from API - optimized to load all data at once
   const fetchPools = async (forceRefresh = false, page = 1) => {
@@ -224,6 +263,9 @@ export default function CalendarPoolsScreen() {
       // Filter pools that are active on the selected date
       return pools.filter((pool) => {
         try {
+          // Add null checks to prevent errors
+          if (!pool.startDate || !pool.endDate) return false;
+
           const startDate = startOfDay(parseISO(pool.startDate));
           const endDate = startOfDay(parseISO(pool.endDate));
           const selectedDay = startOfDay(date);
@@ -244,30 +286,96 @@ export default function CalendarPoolsScreen() {
     []
   );
 
-  // Get filtered pools based on tab and date - also memoized
-  const getFilteredPools = useMemo(() => {
-    const dateFilteredPools = filterPoolsByDate(
-      selectedDate,
-      filteredPoolsByTab
-    );
+  // Replace the updateDynamicCategoryColors function with a version that directly uses getPoolColor
+  const updateDynamicCategoryColors = useCallback((pools: VotingPool[]) => {
+    // Extract unique categories from the current pools
+    const uniqueCategories = Array.from(
+      new Set(pools.map((pool) => pool.category))
+    ).filter(Boolean);
 
-    // Sort pools by date
-    return dateFilteredPools.sort((a, b) => {
-      // For upcoming and active pools, sort by start date
-      // For closed pools, sort by end date
-      const dateA =
-        a.status === "closed"
-          ? parseISO(a.endDate).getTime()
-          : parseISO(a.startDate).getTime();
+    // Create a map of categories to colors using the same getPoolColor function
+    // that's used to color the pools in the calendar
+    const categoryColorMap: Record<string, string> = {};
 
-      const dateB =
-        b.status === "closed"
-          ? parseISO(b.endDate).getTime()
-          : parseISO(b.startDate).getTime();
-
-      return dateA - dateB;
+    uniqueCategories.forEach((category) => {
+      // Create a dummy pool with just the category to get its color
+      const dummyPool = { category } as VotingPool;
+      categoryColorMap[category] = getPoolColor(dummyPool);
     });
-  }, [filteredPoolsByTab, selectedDate, filterPoolsByDate]);
+
+    setDynamicCategoryColors(categoryColorMap);
+  }, []);
+
+  // Update dynamic categories when allPoolsData changes
+  useEffect(() => {
+    if (allPoolsData.length > 0) {
+      updateDynamicCategoryColors(allPoolsData);
+    }
+  }, [allPoolsData, updateDynamicCategoryColors]);
+
+  // Add a filter function for categories
+  const filterPoolsByCategory = useCallback(
+    (pools: VotingPool[]) => {
+      if (!selectedCategory) return pools;
+      return pools.filter((pool) => pool.category === selectedCategory);
+    },
+    [selectedCategory]
+  );
+
+  // Modify getFilteredPools to include category filtering
+  const getFilteredPools = useMemo(() => {
+    try {
+      // First filter by date
+      const dateFilteredPools = filterPoolsByDate(
+        selectedDate,
+        filteredPoolsByTab
+      );
+
+      // Then filter by category if one is selected
+      const categoryFilteredPools = filterPoolsByCategory(dateFilteredPools);
+
+      // When pools change, update the dynamic categories
+      if (categoryFilteredPools.length > 0) {
+        updateDynamicCategoryColors(categoryFilteredPools);
+      }
+
+      // Sort pools by date
+      return categoryFilteredPools.sort((a, b) => {
+        try {
+          // For upcoming and active pools, sort by start date
+          // For closed pools, sort by end date
+          const dateA =
+            a.status === "closed" && a.endDate
+              ? parseISO(a.endDate).getTime()
+              : a.startDate
+              ? parseISO(a.startDate).getTime()
+              : 0;
+
+          const dateB =
+            b.status === "closed" && b.endDate
+              ? parseISO(b.endDate).getTime()
+              : b.startDate
+              ? parseISO(b.startDate).getTime()
+              : 0;
+
+          return dateA - dateB;
+        } catch (error) {
+          console.error("Error sorting pools by date:", error, { a, b });
+          return 0;
+        }
+      });
+    } catch (error) {
+      console.error("Error in getFilteredPools:", error);
+      return [];
+    }
+  }, [
+    filteredPoolsByTab,
+    selectedDate,
+    filterPoolsByDate,
+    updateDynamicCategoryColors,
+    selectedCategory,
+    filterPoolsByCategory,
+  ]);
 
   const handleDateSelect = useCallback((date: Date | null) => {
     setSelectedDate(date);
@@ -306,6 +414,11 @@ export default function CalendarPoolsScreen() {
     [activeTab]
   );
 
+  // Function to handle category selection
+  const handleCategorySelect = useCallback((category: string) => {
+    setSelectedCategory((prev) => (prev === category ? null : category));
+  }, []);
+
   // Memoize grouped pools to avoid recalculation
   const { groupedPools, dateKeys } = useMemo(() => {
     const grouped = groupPoolsByDate(getFilteredPools);
@@ -315,10 +428,26 @@ export default function CalendarPoolsScreen() {
     return { groupedPools: grouped, dateKeys: sortedKeys };
   }, [getFilteredPools]);
 
-  // Memoize calendar pools to avoid recalculation
+  // Memoize calendar pools to use the filtered pools instead of all pools
   const calendarPools = useMemo(() => {
-    return getCalendarPools(allPoolsData, activeTab);
-  }, [allPoolsData, activeTab]);
+    // If a date or category is selected, use the filtered pools to show only those in the calendar
+    if (selectedDate || selectedCategory) {
+      return getFilteredPools;
+    }
+
+    // Otherwise use the getCalendarPools with filtering logic
+    return getCalendarPools(
+      activeTab === "all" ? allPoolsData : filteredPoolsByTab,
+      activeTab
+    );
+  }, [
+    allPoolsData,
+    activeTab,
+    filteredPoolsByTab,
+    selectedDate,
+    selectedCategory,
+    getFilteredPools,
+  ]);
 
   // Function to navigate to the pool details screen
   const handleOpenPool = useCallback(
@@ -565,6 +694,10 @@ export default function CalendarPoolsScreen() {
                       {
                         backgroundColor: getPoolColor(pool),
                         opacity: isDark ? 0.9 : 1,
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.2,
+                        shadowRadius: 1,
                       },
                     ]}
                   />
@@ -658,20 +791,37 @@ export default function CalendarPoolsScreen() {
                             { color: isDark ? "#AEAEB2" : "#8E8E93" },
                           ]}
                         >
-                          {pool.status === "upcoming"
-                            ? `Inicia em ${format(
-                                parseISO(pool.startDate),
-                                "dd/MM/yyyy"
-                              )}`
-                            : pool.status === "closed"
-                            ? `Encerrada em ${format(
-                                parseISO(pool.endDate),
-                                "dd/MM/yyyy"
-                              )}`
-                            : `Termina em ${format(
-                                parseISO(pool.endDate),
-                                "dd/MM/yyyy"
-                              )}`}
+                          {(() => {
+                            try {
+                              if (
+                                pool.status === "upcoming" &&
+                                pool.startDate
+                              ) {
+                                return `Inicia em ${format(
+                                  parseISO(pool.startDate),
+                                  "dd/MM/yyyy"
+                                )}`;
+                              } else if (
+                                pool.status === "closed" &&
+                                pool.endDate
+                              ) {
+                                return `Encerrada em ${format(
+                                  parseISO(pool.endDate),
+                                  "dd/MM/yyyy"
+                                )}`;
+                              } else if (pool.endDate) {
+                                return `Termina em ${format(
+                                  parseISO(pool.endDate),
+                                  "dd/MM/yyyy"
+                                )}`;
+                              } else {
+                                return "Data indisponível";
+                              }
+                            } catch (error) {
+                              console.error("Error formatting date:", error);
+                              return "Data indisponível";
+                            }
+                          })()}
                         </Text>
                       </View>
 
@@ -707,8 +857,113 @@ export default function CalendarPoolsScreen() {
     );
   };
 
+  const renderCategoryLegend = () => {
+    if (loading || allPoolsData.length === 0) return null;
+
+    // Use the filtered pools to get categories - this ensures we only show categories that are present in the current view
+    const categories = getCategoriesWithColors(
+      // Use filteredPoolsByTab instead of getFilteredPools to show all available categories
+      // even when a category filter is applied
+      selectedCategory ? filteredPoolsByTab : getFilteredPools
+    );
+
+    // If no categories found in the filtered pools, don't show the legend
+    if (Object.keys(categories).length === 0) return null;
+
+    return (
+      <View
+        style={[
+          styles.legendContainer,
+          {
+            borderTopColor: isDark
+              ? "rgba(255, 255, 255, 0.1)"
+              : "rgba(0, 0, 0, 0.05)",
+          },
+        ]}
+      >
+        <View style={styles.legendHeader}>
+          <Text style={[styles.legendTitle, { color: themeColors.text }]}>
+            {selectedDate
+              ? "Categorias nesta data:"
+              : activeTab === "all"
+              ? "Filtrar por categoria:"
+              : `Categorias ${
+                  activeTab === "active"
+                    ? "ativas"
+                    : activeTab === "upcoming"
+                    ? "futuras"
+                    : "encerradas"
+                }:`}
+          </Text>
+          {selectedCategory && (
+            <TouchableOpacity
+              style={[
+                styles.clearCategoryButton,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(255, 255, 255, 0.1)"
+                    : "rgba(0, 0, 0, 0.05)",
+                },
+              ]}
+              onPress={() => setSelectedCategory(null)}
+            >
+              <Text style={{ color: themeColors.tint, fontSize: 12 }}>
+                Limpar filtro
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.legendScroll}
+        >
+          {Object.entries(categories).map(([category, color]) => (
+            <TouchableOpacity
+              key={category}
+              style={[
+                styles.legendItem,
+                selectedCategory === category && {
+                  backgroundColor: isDark
+                    ? "rgba(255, 255, 255, 0.1)"
+                    : "rgba(0, 0, 0, 0.05)",
+                  borderRadius: 16,
+                  padding: 4,
+                  paddingHorizontal: 8,
+                },
+              ]}
+              onPress={() => handleCategorySelect(category)}
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.legendColor,
+                  {
+                    backgroundColor: color,
+                    borderWidth: isDark ? 1 : 0,
+                    borderColor: "rgba(255, 255, 255, 0.2)",
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.legendText,
+                  {
+                    color: themeColors.text,
+                    fontWeight: selectedCategory === category ? "600" : "400",
+                  },
+                ]}
+              >
+                {category}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  };
+
   const renderContent = () => {
-    // Use the memoized calendar pools instead of calculating them again
     return (
       <ScrollView
         style={{ flex: 1, backgroundColor: themeColors.background }}
@@ -776,54 +1031,8 @@ export default function CalendarPoolsScreen() {
               </View>
             )}
 
-          {/* Category legend inside calendar container */}
-          {!loading && allPoolsData.length > 0 && (
-            <View
-              style={[
-                styles.legendContainer,
-                {
-                  borderTopColor: isDark
-                    ? "rgba(255, 255, 255, 0.1)"
-                    : "rgba(0, 0, 0, 0.05)",
-                },
-              ]}
-            >
-              <Text style={[styles.legendTitle, { color: themeColors.text }]}>
-                Categorias:
-              </Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.legendScroll}
-              >
-                {Object.entries(CATEGORY_COLORS)
-                  .filter(
-                    ([key]) =>
-                      key !== "default" &&
-                      allPoolsData.some((pool) => pool.category === key)
-                  )
-                  .map(([category, color]) => (
-                    <View key={category} style={styles.legendItem}>
-                      <View
-                        style={[
-                          styles.legendColor,
-                          {
-                            backgroundColor: color,
-                            borderWidth: isDark ? 1 : 0,
-                            borderColor: "rgba(255, 255, 255, 0.2)",
-                          },
-                        ]}
-                      />
-                      <Text
-                        style={[styles.legendText, { color: themeColors.text }]}
-                      >
-                        {category}
-                      </Text>
-                    </View>
-                  ))}
-              </ScrollView>
-            </View>
-          )}
+          {/* Render the category legend using our new function */}
+          {renderCategoryLegend()}
         </View>
 
         {/* Tab filter with refined design */}
@@ -874,6 +1083,36 @@ export default function CalendarPoolsScreen() {
             <TouchableOpacity
               style={styles.clearFilterButton}
               onPress={() => setSelectedDate(null)}
+            >
+              <Text style={{ color: themeColors.tint }}>Limpar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Category filter indicator */}
+        {selectedCategory && !selectedDate && (
+          <View
+            style={[
+              styles.dateFilterIndicator,
+              { backgroundColor: isDark ? "#1C1C1E" : "#FFFFFF" },
+            ]}
+          >
+            <Text style={[styles.dateFilterText, { color: themeColors.text }]}>
+              Filtrando por categoria{" "}
+              <Text
+                style={{
+                  fontWeight: "600",
+                  color: getPoolColor({
+                    category: selectedCategory,
+                  } as VotingPool),
+                }}
+              >
+                {selectedCategory}
+              </Text>
+            </Text>
+            <TouchableOpacity
+              style={styles.clearFilterButton}
+              onPress={() => setSelectedCategory(null)}
             >
               <Text style={{ color: themeColors.tint }}>Limpar</Text>
             </TouchableOpacity>
@@ -1044,8 +1283,12 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   poolCategoryIndicator: {
-    width: 8, // Wider indicator
+    width: 12, // Increased width for better visibility
     opacity: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1,
   },
   poolContent: {
     flex: 1,
@@ -1186,13 +1429,19 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   legendColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1,
+    elevation: 2,
   },
   legendText: {
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: "500",
   },
   skeletonContainer: {
     flex: 1,
@@ -1215,5 +1464,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+  },
+  legendHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  clearCategoryButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
 });

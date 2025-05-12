@@ -353,4 +353,36 @@ export const cacheService = {
       console.error(`Error setting cache for ${key}:`, error);
     }
   },
+
+  // Method to clear all cache (used when logging out)
+  async clearCache(): Promise<void> {
+    try {
+      console.log("[CacheService] Clearing all cache data");
+
+      // Reset in-memory cache
+      cache.votingPools.active = [];
+      cache.votingPools.upcoming = [];
+      cache.votingPools.closed = [];
+      cache.votingPools.byId = {};
+      cache.votingPools.lastFetched.active = 0;
+      cache.votingPools.lastFetched.upcoming = 0;
+      cache.votingPools.lastFetched.closed = 0;
+
+      cache.userVotedPools.active = [];
+      cache.userVotedPools.closed = [];
+      cache.userVotedPools.lastFetched.active = 0;
+      cache.userVotedPools.lastFetched.closed = 0;
+
+      // Clear user data in AsyncStorage
+      await AsyncStorage.removeItem("currentUser");
+      await AsyncStorage.removeItem("currentUserTimestamp");
+
+      // Use offlineStorage to clear cached data
+      await offlineStorage.invalidateCache("all");
+
+      console.log("[CacheService] Cache cleared successfully");
+    } catch (error) {
+      console.error("[CacheService] Error clearing cache:", error);
+    }
+  },
 };

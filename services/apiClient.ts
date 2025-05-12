@@ -2,6 +2,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import { User, Vote, VotingOption, VotingPool } from "../types";
 import { cacheService } from "./cacheService";
+import { offlineStorage } from "./offlineStorage";
 import { offlineVoteManager } from "./offlineVoteManager";
 import NetInfo from "@react-native-community/netinfo";
 import { API_BASE_URL, TOKEN_STORAGE_KEY } from "./apiConfig";
@@ -313,6 +314,13 @@ export const authApi = {
 
       if (!response.ok) {
         const errorData = await response.json();
+
+        // Handle invalid credentials silently without console errors
+        if (response.status === 401) {
+          throw new Error("Invalid credentials");
+        }
+
+        // Only log other types of errors
         console.error("Login error response:", errorData);
         throw new Error(errorData.message || "Login failed");
       }
@@ -362,7 +370,13 @@ export const authApi = {
 
       return { user: data.user, token: data.token };
     } catch (error) {
-      console.error("Login error in API client:", error);
+      // Only log detailed errors if it's not a credentials issue
+      if (
+        error instanceof Error &&
+        !error.message.includes("Invalid credentials")
+      ) {
+        console.error("Login error in API client:", error);
+      }
       throw error;
     }
   },
@@ -473,6 +487,15 @@ export const authApi = {
       } finally {
         // Remove the token regardless of API response
         await removeToken();
+
+        // Clear cache and offline data when logging out
+        try {
+          console.log("[authApi] Clearing cache and offline data on logout");
+          await cacheService.clearCache();
+          await offlineStorage.clearOfflineData();
+        } catch (clearError) {
+          console.error("[authApi] Error clearing data on logout:", clearError);
+        }
       }
     }
   },
@@ -1137,7 +1160,7 @@ export const votesApi = {
         } as Vote;
       } else {
         console.log("Vote submitted online successfully");
-        
+
         // Don't try to fetch additional data - just use the result directly
         // The vote was successful online, so we can return a valid vote object
         return {
@@ -1181,13 +1204,15 @@ export const votesApi = {
       }
 
       const data = await response.json();
-      
+
       // The server returns { regularVotes, anonymousParticipation }
       const regularVotes = data.regularVotes || [];
       const anonymousVotes = data.anonymousParticipation || [];
-      
-      console.log(`Retrieved ${regularVotes.length} regular votes and ${anonymousVotes.length} anonymous votes`);
-      
+
+      console.log(
+        `Retrieved ${regularVotes.length} regular votes and ${anonymousVotes.length} anonymous votes`
+      );
+
       // Return regular votes - they have full details
       return regularVotes;
     } catch (error) {

@@ -71,7 +71,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         error: null,
       });
     } catch (error) {
-      console.error("Login error:", error);
+      // Don't log credentials errors to console
+      if (
+        error instanceof Error &&
+        !error.message.includes("Invalid credentials")
+      ) {
+        console.error("Login error:", error);
+      }
+
       setState({
         user: null,
         isLoading: false,

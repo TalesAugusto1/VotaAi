@@ -26,6 +26,10 @@ import { Vote } from "../../types";
 import { CustomModal } from "../../components/CustomModal";
 import { useModal } from "../../hooks/useModal";
 import { router } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// Import cacheService to clear cache on logout
+import { cacheService } from "../../services/cacheService";
 
 interface UserVote extends Vote {
   pool?: {
@@ -131,7 +135,7 @@ export default function ProfileScreen() {
     fetchUserVoteStats();
   }, [user]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     showModal({
@@ -146,8 +150,18 @@ export default function ProfileScreen() {
         },
         {
           text: "Sair",
-          onPress: () => {
+          onPress: async () => {
             hideModal();
+
+            // Clear all cache before logging out
+            try {
+              console.log("Clearing cache on logout");
+              await cacheService.clearCache();
+            } catch (error) {
+              console.error("Error clearing cache:", error);
+            }
+
+            // Logout the user
             logout();
           },
           style: "destructive",
@@ -372,10 +386,11 @@ export default function ProfileScreen() {
 
       <CustomModal
         visible={visible}
-        title={options?.title}
-        message={options?.message}
-        type={options?.type}
+        title={options?.title || ""}
+        message={options?.message || ""}
+        type={options?.type || "info"}
         actions={options?.actions}
+        onClose={hideModal}
       />
     </ScrollView>
   );

@@ -26,29 +26,57 @@ import { ptBR } from "date-fns/locale";
 import { Ionicons } from "@expo/vector-icons";
 import { VotingPool } from "../types";
 
-// Update the CATEGORY_COLORS to use more vibrant pastel tones
+// Update the CATEGORY_COLORS to use more user-friendly colors
 export const CATEGORY_COLORS: Record<string, string> = {
-  Associação: "#FFC0CB", // More vibrant pink
-  Comunidade: "#A7F0B7", // More vibrant green
-  Municipal: "#FFFF99", // More vibrant yellow
-  Estadual: "#A7D8FF", // More vibrant blue
-  Federal: "#D5BAFF", // More vibrant purple
-  Educação: "#FFD699", // More vibrant orange
-  Saúde: "#A7F0FF", // More vibrant cyan
-  Esporte: "#FFCCC7", // More vibrant misty rose
-  Cultura: "#CCCCFF", // More vibrant lavender
-  default: "#EEEEEE", // Slightly darker gray
+  Associação: "#F087B3", // Softer pink
+  Comunidade: "#75D085", // Softer green
+  Municipal: "#FFD966", // Softer yellow
+  Estadual: "#64B5F6", // Softer blue
+  Federal: "#B39DDB", // Softer purple
+  Educação: "#FFAB91", // Softer orange
+  Saúde: "#80DEEA", // Softer cyan
+  Esporte: "#EF9A9A", // Softer red
+  Cultura: "#9FA8DA", // Softer indigo
+  default: "#E0E0E0", // Light gray
 };
 
 // Helper function to get a pastel color based on pool category or id
 export const getPoolColor = (pool: VotingPool): string => {
-  // Return the color for the category if it exists
+  // Check if pool is valid
+  if (!pool) {
+    return CATEGORY_COLORS.default;
+  }
+
+  // Return the color for the category if it exists - this is the priority
   if (pool.category && CATEGORY_COLORS[pool.category]) {
     return CATEGORY_COLORS[pool.category];
   }
 
-  // Otherwise, generate a color based on the pool ID
+  // If the pool has a category but it's not in our predefined colors,
+  // we'll still derive a consistent color for that category
+  if (pool.category) {
+    // Generate a hash from the category name for consistent color
+    let hash = 0;
+    for (let i = 0; i < pool.category.length; i++) {
+      hash = pool.category.charCodeAt(i) + ((hash << 5) - hash);
+    }
+
+    // Get the predefined colors (excluding default)
+    const colorValues = Object.values(CATEGORY_COLORS).filter(
+      (color) => color !== CATEGORY_COLORS.default
+    );
+
+    // Use the hash to pick a consistent color
+    const colorIndex = Math.abs(hash) % colorValues.length;
+    return colorValues[colorIndex];
+  }
+
+  // Last resort: generate a color based on the pool ID
   const poolId = pool.id;
+  if (!poolId) {
+    return CATEGORY_COLORS.default;
+  }
+
   const categories = Object.keys(CATEGORY_COLORS).filter(
     (c) => c !== "default"
   );
@@ -277,8 +305,14 @@ const PoolCalendar: React.FC<PoolCalendarProps> = ({
                           ? "45%"
                           : "30%",
                       marginLeft: index > 0 ? 1 : 0,
-                      opacity: isDark ? 0.95 : 0.85,
-                      height: isDark ? 5 : 4, // Slightly taller in dark mode for better visibility
+                      opacity: isDark ? 1 : 0.95,
+                      height: isDark ? 6 : 5,
+                      borderRadius: 3,
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 1,
+                      elevation: 2,
                     },
                   ]}
                 />
