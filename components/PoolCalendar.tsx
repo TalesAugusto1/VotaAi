@@ -26,17 +26,41 @@ import { ptBR } from "date-fns/locale";
 import { Ionicons } from "@expo/vector-icons";
 import { VotingPool } from "../types";
 
-// Update the CATEGORY_COLORS to use more user-friendly colors
+// Update the CATEGORY_COLORS with a more comprehensive set of categories
 export const CATEGORY_COLORS: Record<string, string> = {
+  // Political/Governmental categories
+  Municipal: "#64B5F6", // Softer blue
+  Estadual: "#4FC3F7", // Light blue
+  Federal: "#B39DDB", // Softer purple
+  Legislativo: "#9575CD", // Medium purple
+  Executivo: "#7986CB", // Indigo
+  Judiciário: "#4DB6AC", // Teal
+
+  // Community categories
   Associação: "#F087B3", // Softer pink
   Comunidade: "#75D085", // Softer green
-  Municipal: "#FFD966", // Softer yellow
-  Estadual: "#64B5F6", // Softer blue
-  Federal: "#B39DDB", // Softer purple
+  Bairro: "#81C784", // Medium green
+  Condomínio: "#AED581", // Light green
+
+  // Sector categories
   Educação: "#FFAB91", // Softer orange
   Saúde: "#80DEEA", // Softer cyan
   Esporte: "#EF9A9A", // Softer red
   Cultura: "#9FA8DA", // Softer indigo
+  Transporte: "#FFD966", // Softer yellow
+  Segurança: "#E57373", // Light red
+  "Meio Ambiente": "#A5D6A7", // Green
+  Economia: "#F9A825", // Amber
+  Infraestrutura: "#90A4AE", // Blue gray
+  Tecnologia: "#CE93D8", // Light purple
+
+  // Miscellaneous
+  Enquete: "#BCAAA4", // Brown
+  Orçamento: "#78909C", // Dark gray blue
+  Debate: "#FFB74D", // Orange
+  Consulta: "#BA68C8", // Purple
+
+  // Default
   default: "#E0E0E0", // Light gray
 };
 

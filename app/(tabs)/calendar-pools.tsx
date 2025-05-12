@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import {
   StyleSheet,
   View,
@@ -9,6 +15,10 @@ import {
   RefreshControl,
   useColorScheme,
   FlatList,
+  Modal,
+  TextInput,
+  Animated,
+  Easing,
 } from "react-native";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { Colors } from "../../constants/Colors";
@@ -140,6 +150,8 @@ export default function CalendarPoolsScreen() {
   const [activeTab, setActiveTab] = useState<TabType>("all");
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [categorySearchText, setCategorySearchText] = useState("");
   const { visible, options, showModal, hideModal } = useModal();
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -148,6 +160,33 @@ export default function CalendarPoolsScreen() {
   const [dynamicCategoryColors, setDynamicCategoryColors] = useState<
     Record<string, string>
   >({});
+
+  // Animation for category filter expansion
+  const expandAnim = useRef(
+    new Animated.Value(selectedCategory ? 1 : 0)
+  ).current;
+
+  // Update animation when selected category changes
+  useEffect(() => {
+    // Different configurations for opening and closing animations
+    if (selectedCategory) {
+      // Opening animation - quick start, then slow ease-out
+      Animated.timing(expandAnim, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    } else {
+      // Closing animation - start slow, then accelerate
+      Animated.timing(expandAnim, {
+        toValue: 0,
+        duration: 250, // Slightly faster collapse for better UX
+        easing: Easing.bezier(0.4, 0.0, 0.2, 1), // Material Design standard easing
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [selectedCategory, expandAnim]);
 
   // Fetch pools from API - optimized to load all data at once
   const fetchPools = async (forceRefresh = false, page = 1) => {
@@ -414,9 +453,10 @@ export default function CalendarPoolsScreen() {
     [activeTab]
   );
 
-  // Function to handle category selection
+  // Add function to handle category selection
   const handleCategorySelect = useCallback((category: string) => {
     setSelectedCategory((prev) => (prev === category ? null : category));
+    setShowCategoryModal(false); // Close modal after selection
   }, []);
 
   // Memoize grouped pools to avoid recalculation
@@ -857,109 +897,468 @@ export default function CalendarPoolsScreen() {
     );
   };
 
-  const renderCategoryLegend = () => {
+  // Replace the current renderCategoryFilter function
+  const renderCategoryFilter = () => {
     if (loading || allPoolsData.length === 0) return null;
 
-    // Use the filtered pools to get categories - this ensures we only show categories that are present in the current view
-    const categories = getCategoriesWithColors(
-      // Use filteredPoolsByTab instead of getFilteredPools to show all available categories
-      // even when a category filter is applied
-      selectedCategory ? filteredPoolsByTab : getFilteredPools
-    );
+    // Get all categories for filtering
+    const categories = getCategoriesWithColors(filteredPoolsByTab);
 
-    // If no categories found in the filtered pools, don't show the legend
+    // If no categories found, don't show the filter
     if (Object.keys(categories).length === 0) return null;
 
+    // Interpolate height and opacity for animation
+    const contentHeight = expandAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 40],
+    });
+
+    const contentOpacity = expandAnim.interpolate({
+      inputRange: [0, 0.3, 1],
+      outputRange: [0, 0, 1],
+    });
+
+    const scale = expandAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.95, 1],
+    });
+
+    // Interpolate bottom padding for the container to remove space when collapsed
+    const paddingBottom = expandAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 16],
+    });
+
     return (
-      <View
+      <Animated.View
         style={[
-          styles.legendContainer,
+          styles.categoryFilterCard,
           {
-            borderTopColor: isDark
-              ? "rgba(255, 255, 255, 0.1)"
-              : "rgba(0, 0, 0, 0.05)",
+            backgroundColor: isDark ? "#1C1C1E" : "#FFFFFF",
+            paddingBottom: paddingBottom,
+            justifyContent: "center", // Center content vertically
+            minHeight: 60, // Ensure consistent minimum height
           },
         ]}
       >
-        <View style={styles.legendHeader}>
-          <Text style={[styles.legendTitle, { color: themeColors.text }]}>
-            {selectedDate
-              ? "Categorias nesta data:"
-              : activeTab === "all"
-              ? "Filtrar por categoria:"
-              : `Categorias ${
-                  activeTab === "active"
-                    ? "ativas"
-                    : activeTab === "upcoming"
-                    ? "futuras"
-                    : "encerradas"
-                }:`}
+        <TouchableOpacity
+          style={[
+            styles.categoryFilterHeader,
+            { paddingVertical: 10 }, // Add padding for better touch target
+          ]}
+          onPress={() => setShowCategoryModal(true)}
+          activeOpacity={0.7}
+        >
+          <Text
+            style={[styles.categoryFilterTitle, { color: themeColors.text }]}
+          >
+            Filtrar por categoria
           </Text>
-          {selectedCategory && (
+
+          {selectedCategory ? (
             <TouchableOpacity
               style={[
                 styles.clearCategoryButton,
                 {
                   backgroundColor: isDark
-                    ? "rgba(255, 255, 255, 0.1)"
-                    : "rgba(0, 0, 0, 0.05)",
+                    ? "rgba(255, 255, 255, 0.08)"
+                    : "rgba(0, 0, 0, 0.04)",
                 },
               ]}
-              onPress={() => setSelectedCategory(null)}
+              onPress={(e) => {
+                e.stopPropagation(); // Prevent triggering the parent TouchableOpacity
+                setSelectedCategory(null);
+              }}
             >
               <Text style={{ color: themeColors.tint, fontSize: 12 }}>
-                Limpar filtro
+                Limpar
               </Text>
             </TouchableOpacity>
+          ) : (
+            <View style={styles.chevronContainer}>
+              <Ionicons
+                name="chevron-down"
+                size={16}
+                color={
+                  isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.3)"
+                }
+              />
+            </View>
           )}
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.legendScroll}
+        </TouchableOpacity>
+
+        <Animated.View
+          style={[
+            styles.selectedCategoryContainer,
+            {
+              height: contentHeight,
+              opacity: contentOpacity,
+              overflow: "hidden",
+              transform: [{ scale }],
+              marginTop: expandAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 12],
+              }),
+            },
+          ]}
         >
-          {Object.entries(categories).map(([category, color]) => (
-            <TouchableOpacity
-              key={category}
+          <View style={styles.categoryBadgeRow}>
+            {selectedCategory && (
+              <>
+                <View
+                  style={[
+                    styles.categoryColorDot,
+                    {
+                      backgroundColor: getPoolColor({
+                        category: selectedCategory,
+                      } as VotingPool),
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.selectedCategoryText,
+                    { color: themeColors.text },
+                  ]}
+                >
+                  {selectedCategory}
+                </Text>
+              </>
+            )}
+          </View>
+        </Animated.View>
+      </Animated.View>
+    );
+  };
+
+  // Create the category selector modal component
+  const CategorySelectorModal = () => {
+    // Get all categories for filtering
+    const categories = getCategoriesWithColors(filteredPoolsByTab);
+    const categoryEntries = Object.entries(categories);
+
+    // Group categories by type for better organization
+    const categoryGroups: Record<string, string[]> = {
+      Governamentais: [
+        "Governo Federal",
+        "Governo Estadual",
+        "Prefeitura",
+        "Congresso Nacional",
+        "Assembleia Legislativa",
+        "Câmara Municipal",
+        "Políticas Públicas",
+      ],
+      Comunitárias: [
+        "Associação de Moradores",
+        "Conselho Comunitário",
+        "Bairro",
+        "Condomínio",
+        "Grêmio Estudantil",
+        "Diretório Acadêmico",
+      ],
+      Setoriais: [
+        "Educação",
+        "Saúde",
+        "Meio Ambiente",
+        "Transporte",
+        "Segurança",
+        "Cultura",
+        "Esporte",
+        "Lazer",
+        "Tecnologia",
+        "Economia",
+        "Agricultura",
+        "Indústria",
+        "Comércio",
+        "Serviços",
+      ],
+      Outras: [], // Will hold any categories not in defined groups
+    };
+
+    // Filter categories based on search
+    const filteredCategories = categoryEntries.filter(
+      ([category]) =>
+        !categorySearchText ||
+        category.toLowerCase().includes(categorySearchText.toLowerCase())
+    );
+
+    // Sort categories into groups
+    const organizedCategories: Record<string, [string, string][]> = {
+      Governamentais: [],
+      Comunitárias: [],
+      Setoriais: [],
+      Outras: [],
+    };
+
+    filteredCategories.forEach(([category, color]) => {
+      let placed = false;
+
+      // Check each predefined group
+      Object.keys(categoryGroups).forEach((groupName) => {
+        if (categoryGroups[groupName].includes(category)) {
+          organizedCategories[groupName].push([category, color]);
+          placed = true;
+        }
+      });
+
+      // If not in any predefined group, put in "Outras"
+      if (!placed) {
+        organizedCategories["Outras"].push([category, color]);
+      }
+    });
+
+    // Count total categories in each group
+    const groupCounts: Record<string, number> = {};
+    Object.keys(organizedCategories).forEach((group) => {
+      groupCounts[group] = organizedCategories[group].length;
+    });
+
+    // Track if search is active to skip empty group headers
+    const isSearchActive = categorySearchText.length > 0;
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showCategoryModal}
+        onRequestClose={() => setShowCategoryModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: isDark ? "#1C1C1E" : "#FFFFFF" },
+            ]}
+          >
+            <View style={styles.modalHeader}>
+              <TouchableOpacity
+                style={styles.closeButtonTop}
+                onPress={() => setShowCategoryModal(false)}
+              >
+                <Ionicons
+                  name="chevron-down"
+                  size={26}
+                  color={themeColors.text}
+                />
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                Selecionar Categoria
+              </Text>
+              <TouchableOpacity
+                onPress={() => setShowCategoryModal(false)}
+                style={styles.closeButton}
+              >
+                <Text style={{ color: themeColors.tint, fontWeight: "500" }}>
+                  Concluído
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View
               style={[
-                styles.legendItem,
-                selectedCategory === category && {
+                styles.searchContainer,
+                {
                   backgroundColor: isDark
                     ? "rgba(255, 255, 255, 0.1)"
                     : "rgba(0, 0, 0, 0.05)",
-                  borderRadius: 16,
-                  padding: 4,
-                  paddingHorizontal: 8,
+                  borderColor: isDark
+                    ? "rgba(255, 255, 255, 0.1)"
+                    : "rgba(0, 0, 0, 0.05)",
                 },
               ]}
-              onPress={() => handleCategorySelect(category)}
-              activeOpacity={0.7}
             >
-              <View
-                style={[
-                  styles.legendColor,
-                  {
-                    backgroundColor: color,
-                    borderWidth: isDark ? 1 : 0,
-                    borderColor: "rgba(255, 255, 255, 0.2)",
-                  },
-                ]}
+              <Ionicons
+                name="search"
+                size={18}
+                color={
+                  isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.4)"
+                }
+                style={{ marginRight: 8 }}
               />
-              <Text
-                style={[
-                  styles.legendText,
-                  {
-                    color: themeColors.text,
-                    fontWeight: selectedCategory === category ? "600" : "400",
-                  },
-                ]}
+              <TextInput
+                style={[styles.searchInput, { color: themeColors.text }]}
+                placeholder="Buscar categoria..."
+                placeholderTextColor={
+                  isDark ? "rgba(255, 255, 255, 0.4)" : "rgba(0, 0, 0, 0.4)"
+                }
+                value={categorySearchText}
+                onChangeText={setCategorySearchText}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {categorySearchText.length > 0 && (
+                <TouchableOpacity onPress={() => setCategorySearchText("")}>
+                  <Ionicons
+                    name="close-circle"
+                    size={18}
+                    color={
+                      isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.4)"
+                    }
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {selectedCategory && (
+              <View style={styles.selectedCategoryContainer}>
+                <Text
+                  style={[
+                    styles.selectedCategoryLabel,
+                    { color: themeColors.text },
+                  ]}
+                >
+                  Categoria selecionada:
+                </Text>
+                <View
+                  style={[
+                    styles.selectedCategoryBadge,
+                    {
+                      backgroundColor: getPoolColor({
+                        category: selectedCategory,
+                      } as VotingPool),
+                    },
+                  ]}
+                >
+                  <Text style={styles.selectedCategoryText}>
+                    {selectedCategory}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setSelectedCategory(null)}
+                    style={styles.clearSelectedCategory}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={18}
+                      color="rgba(255,255,255,0.9)"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {filteredCategories.length === 0 ? (
+              <View style={styles.noResultsContainer}>
+                <Ionicons
+                  name="search-outline"
+                  size={48}
+                  color={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)"}
+                />
+                <Text
+                  style={[styles.noResultsText, { color: themeColors.text }]}
+                >
+                  Nenhuma categoria encontrada
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.resetSearchButton,
+                    { backgroundColor: themeColors.tint },
+                  ]}
+                  onPress={() => setCategorySearchText("")}
+                >
+                  <Text style={{ color: "white", fontWeight: "500" }}>
+                    Limpar busca
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.categoriesList}
+                showsVerticalScrollIndicator={false}
               >
-                {category}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+                {Object.keys(organizedCategories).map((groupName) => {
+                  // Skip empty groups
+                  if (organizedCategories[groupName].length === 0) return null;
+
+                  return (
+                    <View key={groupName} style={styles.categoryGroup}>
+                      {/* Only show group header if not searching or if group has items */}
+                      {(!isSearchActive ||
+                        organizedCategories[groupName].length > 0) && (
+                        <View style={styles.categoryGroupHeader}>
+                          <Text
+                            style={[
+                              styles.categoryGroupTitle,
+                              { color: themeColors.text },
+                            ]}
+                          >
+                            {groupName}
+                            <Text style={styles.categoryGroupCount}>
+                              {" "}
+                              ({organizedCategories[groupName].length})
+                            </Text>
+                          </Text>
+                        </View>
+                      )}
+
+                      {organizedCategories[groupName].map(
+                        ([category, color]) => (
+                          <TouchableOpacity
+                            key={category}
+                            style={[
+                              styles.categoryListItem,
+                              selectedCategory === category && {
+                                backgroundColor: isDark
+                                  ? "rgba(255, 255, 255, 0.1)"
+                                  : "rgba(0, 0, 0, 0.05)",
+                                borderColor: themeColors.tint,
+                                borderWidth: 1,
+                              },
+                            ]}
+                            onPress={() => handleCategorySelect(category)}
+                            activeOpacity={0.7}
+                          >
+                            <View style={styles.categoryColorRow}>
+                              <View
+                                style={[
+                                  styles.categoryColorIndicator,
+                                  { backgroundColor: color },
+                                ]}
+                              />
+                              <Text
+                                style={[
+                                  styles.categoryListItemText,
+                                  { color: themeColors.text },
+                                  selectedCategory === category && {
+                                    fontWeight: "600",
+                                  },
+                                ]}
+                              >
+                                {category}
+                              </Text>
+                            </View>
+
+                            {selectedCategory === category ? (
+                              <View style={styles.selectedIndicator}>
+                                <Ionicons
+                                  name="checkmark-circle"
+                                  size={22}
+                                  color={themeColors.tint}
+                                />
+                              </View>
+                            ) : (
+                              <View
+                                style={[
+                                  styles.selectCircle,
+                                  {
+                                    borderColor: isDark
+                                      ? "rgba(255, 255, 255, 0.3)"
+                                      : "rgba(0, 0, 0, 0.2)",
+                                  },
+                                ]}
+                              />
+                            )}
+                          </TouchableOpacity>
+                        )
+                      )}
+                    </View>
+                  );
+                })}
+                <View style={{ height: 30 }} />
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -1030,10 +1429,10 @@ export default function CalendarPoolsScreen() {
                 </Text>
               </View>
             )}
-
-          {/* Render the category legend using our new function */}
-          {renderCategoryLegend()}
         </View>
+
+        {/* Category filter - moved above tab filters */}
+        {renderCategoryFilter()}
 
         {/* Tab filter with refined design */}
         <View
@@ -1083,36 +1482,6 @@ export default function CalendarPoolsScreen() {
             <TouchableOpacity
               style={styles.clearFilterButton}
               onPress={() => setSelectedDate(null)}
-            >
-              <Text style={{ color: themeColors.tint }}>Limpar</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Category filter indicator */}
-        {selectedCategory && !selectedDate && (
-          <View
-            style={[
-              styles.dateFilterIndicator,
-              { backgroundColor: isDark ? "#1C1C1E" : "#FFFFFF" },
-            ]}
-          >
-            <Text style={[styles.dateFilterText, { color: themeColors.text }]}>
-              Filtrando por categoria{" "}
-              <Text
-                style={{
-                  fontWeight: "600",
-                  color: getPoolColor({
-                    category: selectedCategory,
-                  } as VotingPool),
-                }}
-              >
-                {selectedCategory}
-              </Text>
-            </Text>
-            <TouchableOpacity
-              style={styles.clearFilterButton}
-              onPress={() => setSelectedCategory(null)}
             >
               <Text style={{ color: themeColors.tint }}>Limpar</Text>
             </TouchableOpacity>
@@ -1170,6 +1539,7 @@ export default function CalendarPoolsScreen() {
     <View style={{ flex: 1, backgroundColor: themeColors.background }}>
       <StatusBar style={isDark ? "light" : "dark"} />
       {renderContent()}
+      <CategorySelectorModal />
 
       {/* Custom Modal */}
       <CustomModal
@@ -1471,9 +1841,203 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
+  categoryFilterCard: {
+    marginHorizontal: 16,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 0, // Remove top padding
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+    marginBottom: 16,
+    overflow: "hidden",
+  },
+  categoryFilterHeaderContainer: {
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 60, // Ensure minimum height for vertical centering
+  },
+  categoryFilterHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  categoryFilterTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
   clearCategoryButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 12,
+  },
+  selectCategoryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectedCategoryContainer: {
+    justifyContent: "center",
+  },
+  categoryBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  categoryColorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  selectedCategoryText: {
+    fontWeight: "500",
+    fontSize: 15,
+  },
+  selectedCategoryLabel: {
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  clearSelectedCategory: {
+    padding: 4,
+  },
+  selectedCategoryBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end", // Modal slides up from bottom
+  },
+  modalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 24,
+    maxHeight: "90%", // Increased max height
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0, 0, 0, 0.05)",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  closeButtonTop: {
+    padding: 4,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 4,
+  },
+  categoriesList: {
+    paddingHorizontal: 16,
+  },
+  categoryGroup: {
+    marginBottom: 16,
+  },
+  categoryGroupHeader: {
+    marginBottom: 8,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0, 0, 0, 0.05)",
+  },
+  categoryGroupTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  categoryGroupCount: {
+    fontWeight: "400",
+    opacity: 0.6,
+  },
+  categoryListItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  categoryColorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  categoryColorIndicator: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    marginRight: 12,
+  },
+  categoryListItemText: {
+    fontSize: 16,
+  },
+  noResultsContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 40,
+    paddingBottom: 40,
+  },
+  noResultsText: {
+    textAlign: "center",
+    fontSize: 16,
+    opacity: 0.7,
+    marginVertical: 16,
+  },
+  resetSearchButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 16,
+  },
+  selectedIndicator: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  selectCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  chevronContainer: {
+    padding: 4,
   },
 });
