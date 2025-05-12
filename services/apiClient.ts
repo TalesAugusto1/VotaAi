@@ -4,9 +4,7 @@ import { User, Vote, VotingOption, VotingPool } from "../types";
 import { cacheService } from "./cacheService";
 import { offlineVoteManager } from "./offlineVoteManager";
 import NetInfo from "@react-native-community/netinfo";
-
-// API base URL
-const API_BASE_URL = "http://192.168.15.15:3000";
+import { API_BASE_URL, TOKEN_STORAGE_KEY } from "./apiConfig";
 
 // Log the API base URL for debugging
 console.log("API client initialized with base URL:", API_BASE_URL);
@@ -36,9 +34,6 @@ interface PaginatedResponse<T> {
     hasPreviousPage: boolean;
   };
 }
-
-// Token storage key
-const TOKEN_STORAGE_KEY = "VotaAi_token";
 
 // Helper to get the token
 async function getToken(): Promise<string | null> {
@@ -159,6 +154,54 @@ async function debugSetToken(token: string) {
   );
 
   return !!check;
+}
+
+// Add a retry utility function with exponential backoff
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3
+): Promise<Response> {
+  let retries = 0;
+  let lastError: Error = new Error("Maximum retries exceeded");
+
+  while (retries < maxRetries) {
+    try {
+      console.log(`Attempt ${retries + 1}/${maxRetries} to fetch ${url}`);
+      const response = await fetch(url, options);
+
+      // For 429 (too many requests), wait and retry
+      if (response.status === 429) {
+        const backoffTime = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+        console.log(
+          `Rate limited. Backing off for ${backoffTime}ms before retry`
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffTime));
+        retries++;
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      console.error(`Fetch attempt ${retries + 1} failed:`, error);
+      lastError = error as Error;
+
+      // Only retry on network errors, not HTTP errors
+      if (!(error instanceof TypeError)) {
+        throw error;
+      }
+
+      const backoffTime = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+      console.log(
+        `Network error. Backing off for ${backoffTime}ms before retry`
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffTime));
+      retries++;
+    }
+  }
+
+  // If we've exhausted retries, throw the last error
+  throw lastError;
 }
 
 // Auth API functions
@@ -327,6 +370,21 @@ export const authApi = {
   // Get the current user's data
   async getCurrentUser(): Promise<User | null> {
     try {
+      // Check cache first for recent user data
+      const cachedUser = await cacheService.get("currentUser");
+      const cacheTimestamp = await cacheService.get("currentUserTimestamp");
+
+      // Use cached user if available and less than 5 minutes old
+      if (cachedUser && cacheTimestamp) {
+        const cacheAge = Date.now() - parseInt(cacheTimestamp, 10);
+        const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+
+        if (cacheAge < CACHE_MAX_AGE) {
+          console.log("getCurrentUser: Using cached user data");
+          return JSON.parse(cachedUser);
+        }
+      }
+
       const token = await getToken();
 
       if (!token) {
@@ -354,6 +412,11 @@ export const authApi = {
 
       const data = await response.json();
       console.log("getCurrentUser: Successfully retrieved user data");
+
+      // Cache the user data
+      await cacheService.set("currentUser", JSON.stringify(data.user));
+      await cacheService.set("currentUserTimestamp", Date.now().toString());
+
       return data.user;
     } catch (error) {
       console.error("Get current user error:", error);
@@ -429,6 +492,12 @@ export const votingPoolsApi = {
       const networkState = await NetInfo.fetch();
       const isOnline = networkState.isConnected === true;
 
+      // If we're not online, force the use of cache
+      if (!isOnline) {
+        console.log("[POOLS] Offline mode detected, forcing cache use");
+        forceRefresh = false;
+      }
+
       // If we're online and it's the first page, always fetch fresh data first
       // to ensure we have images, but still use cache as fallback for errors
       if (isOnline && page === 1 && !forceRefresh) {
@@ -446,7 +515,11 @@ export const votingPoolsApi = {
             `Fetching fresh pools with URL: ${url}?${params.toString()}`
           );
 
-          const response = await fetch(`${url}?${params.toString()}`);
+          // Use fetchWithRetry instead of fetch
+          const response = await fetchWithRetry(
+            `${url}?${params.toString()}`,
+            {}
+          );
           const data = await handleResponse<{
             data: APIVotingPool[];
             pagination: {
@@ -529,7 +602,8 @@ export const votingPoolsApi = {
 
       console.log(`Fetching pools with URL: ${url}?${params.toString()}`);
 
-      const response = await fetch(`${url}?${params.toString()}`);
+      // Use fetchWithRetry instead of direct fetch
+      const response = await fetchWithRetry(`${url}?${params.toString()}`, {});
       const data = await handleResponse<{
         data: APIVotingPool[];
         pagination: {
@@ -562,6 +636,47 @@ export const votingPoolsApi = {
       };
     } catch (error) {
       console.error("Error fetching voting pools:", error);
+
+      // In case of server error, try to use the cache
+      if (status) {
+        console.log(
+          `Server error, attempting to use ${status} pools cache as fallback`
+        );
+        let cacheResult;
+        try {
+          if (status === "active") {
+            cacheResult = await cacheService.getActiveVotingPools();
+          } else if (status === "upcoming") {
+            cacheResult = await cacheService.getUpcomingVotingPools();
+          } else if (status === "closed") {
+            cacheResult = await cacheService.getClosedVotingPools();
+          }
+
+          if (
+            cacheResult &&
+            cacheResult.isCached &&
+            cacheResult.data.length > 0
+          ) {
+            console.log(
+              `Successfully retrieved ${status} pools from cache as fallback`
+            );
+            return {
+              data: cacheResult.data,
+              pagination: {
+                page: 1,
+                limit,
+                totalCount: cacheResult.data.length,
+                totalPages: Math.ceil(cacheResult.data.length / limit),
+                hasNextPage: cacheResult.data.length > limit,
+                hasPreviousPage: false,
+              },
+            };
+          }
+        } catch (cacheError) {
+          console.error("Error retrieving from cache:", cacheError);
+        }
+      }
+
       // Return empty data with pagination for error case
       return {
         data: [],
@@ -618,37 +733,28 @@ export const votingPoolsApi = {
       // but fall back to cache if there's an error
       if (isOnline && !forceRefresh) {
         try {
-          // Fetch fresh data from API
-          console.log(`Fetching fresh data for pool ${id}`);
-          const response = await fetch(
-            `${API_BASE_URL}/api/voting-pools/${id}`
+          // Use fetchWithRetry instead of direct fetch
+          const response = await fetchWithRetry(
+            `${API_BASE_URL}/api/voting-pools/${id}`,
+            {}
           );
 
-          if (!response.ok) {
-            if (response.status === 404) {
-              return null;
-            }
-            throw new Error("Failed to get voting pool");
+          // If the server returns a 404, return null
+          if (response.status === 404) {
+            console.log(`Voting pool ${id} not found on server`);
+            return null;
           }
 
-          const pool = (await response.json()) as APIVotingPool;
+          const data = await handleResponse<APIVotingPool>(response);
+          const transformedData = transformPoolData(data);
 
-          // Transform API response to match app data structure
-          const transformedPool = transformPoolData(pool);
+          // Update the single pool cache
+          cacheService.setVotingPoolById(id, transformedData);
 
-          // Update the cache
-          cacheService.setVotingPoolById(id, transformedPool);
-
-          console.log(
-            `Pool ${id} - Has image data: ${!!transformedPool.imageData}`
-          );
-          return transformedPool;
+          return transformedData;
         } catch (error) {
-          console.error(
-            `Error fetching fresh data for pool ${id}, trying cache:`,
-            error
-          );
-          // Continue to try cache if online fetch fails
+          console.error(`Error fetching voting pool ${id}:`, error);
+          // Continue to try cache if fetch fails
         }
       }
 
@@ -1031,23 +1137,16 @@ export const votesApi = {
         } as Vote;
       } else {
         console.log("Vote submitted online successfully");
-        // If we're here, the vote was submitted successfully online
-        // Let's fetch the user's votes to include this one
-        const votes = await this.getUserVotes();
-        const thisVote = votes.find((v) => v.poolId === poolId);
-
-        if (thisVote) {
-          return thisVote;
-        } else {
-          // Fallback if we couldn't find the specific vote
-          return {
-            id: "online-vote",
-            poolId,
-            optionId,
-            timestamp: new Date().toISOString(),
-            userId: "current-user", // Placeholder
-          } as Vote;
-        }
+        
+        // Don't try to fetch additional data - just use the result directly
+        // The vote was successful online, so we can return a valid vote object
+        return {
+          id: result.voteId || "online-vote",
+          poolId,
+          optionId,
+          timestamp: new Date().toISOString(),
+          userId: "current-user", // We'll use the current user ID
+        } as Vote;
       }
     } catch (error) {
       console.error("Error in votesApi.submitVote:", error);
@@ -1082,8 +1181,15 @@ export const votesApi = {
       }
 
       const data = await response.json();
-      console.log(`Retrieved ${data.length} user votes`);
-      return data;
+      
+      // The server returns { regularVotes, anonymousParticipation }
+      const regularVotes = data.regularVotes || [];
+      const anonymousVotes = data.anonymousParticipation || [];
+      
+      console.log(`Retrieved ${regularVotes.length} regular votes and ${anonymousVotes.length} anonymous votes`);
+      
+      // Return regular votes - they have full details
+      return regularVotes;
     } catch (error) {
       console.error("getUserVotes error:", error);
       return [];

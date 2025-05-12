@@ -4,8 +4,9 @@ import { nanoid } from "./utils";
 import NetInfo from "@react-native-community/netinfo";
 import * as SecureStore from "expo-secure-store";
 
-// API base URL
-const API_BASE_URL = "https://your-api-url.com";
+// API base URL and token storage key definition
+const API_BASE_URL = "http://192.168.15.15:3000";
+const TOKEN_STORAGE_KEY = "VotaAi_token";
 
 // Maximum number of retry attempts for a vote
 const MAX_RETRY_ATTEMPTS = 3;
@@ -13,7 +14,7 @@ const MAX_RETRY_ATTEMPTS = 3;
 // Get token from secure storage
 const getToken = async (): Promise<string | null> => {
   try {
-    return await SecureStore.getItemAsync("user_token");
+    return await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
   } catch (error) {
     console.error("Error getting token:", error);
     return null;
@@ -34,36 +35,129 @@ const getAuthHeaders = async (): Promise<HeadersInit> => {
   };
 };
 
+// Add fetchWithRetry function similar to apiClient
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3
+): Promise<Response> {
+  let retries = 0;
+  let lastError: Error = new Error("Maximum retries exceeded");
+
+  while (retries < maxRetries) {
+    try {
+      console.log(
+        `[OfflineVoteManager] Attempt ${
+          retries + 1
+        }/${maxRetries} to fetch ${url}`
+      );
+      const response = await fetch(url, options);
+
+      // For 429 (too many requests), wait and retry
+      if (response.status === 429) {
+        const backoffTime = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+        console.log(
+          `[OfflineVoteManager] Rate limited. Backing off for ${backoffTime}ms before retry`
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffTime));
+        retries++;
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      console.error(
+        `[OfflineVoteManager] Fetch attempt ${retries + 1} failed:`,
+        error
+      );
+      lastError = error as Error;
+
+      const backoffTime = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+      console.log(
+        `[OfflineVoteManager] Network error. Backing off for ${backoffTime}ms before retry`
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffTime));
+      retries++;
+    }
+  }
+
+  throw lastError;
+}
+
 // Submit vote directly to the API
 const submitVoteToApi = async (
   poolId: string,
   optionId: string
 ): Promise<any> => {
+  // Get token and handle missing token error proactively
   const token = await getToken();
-
   if (!token) {
+    console.error("[OfflineVoteManager] Authentication token not found");
     throw new Error("Authentication required");
   }
 
+  // Log the token length and first characters for debugging
+  console.log(
+    `[OfflineVoteManager] Using token (length: ${
+      token.length
+    }): ${token.substring(0, 10)}...`
+  );
+
   // Get auth headers and add content type for JSON
-  const headers = (await getAuthHeaders()) as Record<string, string>;
-  headers["Content-Type"] = "application/json";
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
 
-  console.log("Submitting vote with token for pool:", poolId);
-  const response = await fetch(`${API_BASE_URL}/api/votes`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ poolId, optionId }),
-  });
+  console.log("[OfflineVoteManager] Submitting vote for pool:", poolId);
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.message || "Failed to submit vote");
+  try {
+    // Use the retry mechanism
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}/api/votes`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ poolId, optionId }),
+      },
+      3
+    );
+
+    if (!response.ok) {
+      // Handle different error statuses
+      if (response.status === 401 || response.status === 403) {
+        console.error(
+          "[OfflineVoteManager] Authentication failed:",
+          response.status
+        );
+        throw new Error("Authentication required");
+      }
+
+      // Try to parse the error message from response
+      try {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `Failed to submit vote: ${response.status}`
+        );
+      } catch (jsonError) {
+        throw new Error(`API error: ${response.status}`);
+      }
+    }
+
+    // Parse the response
+    try {
+      const data = await response.json();
+      console.log("[OfflineVoteManager] Vote submitted successfully");
+      return data.vote;
+    } catch (parseError) {
+      console.error("[OfflineVoteManager] Error parsing response:", parseError);
+      throw new Error("Failed to parse server response");
+    }
+  } catch (error) {
+    console.error("[OfflineVoteManager] Vote submission failed:", error);
+    throw error;
   }
-
-  const data = await response.json();
-  console.log("Vote submitted successfully");
-  return data.vote;
 };
 
 export const offlineVoteManager = {
@@ -81,9 +175,17 @@ export const offlineVoteManager = {
     if (isOnline) {
       try {
         // If online, try to submit directly to the API
-        await submitVoteToApi(poolId, optionId);
+        const voteResponse = await submitVoteToApi(poolId, optionId);
         console.log("[OfflineVoteManager] Vote submitted online successfully");
-        return { success: true, offline: false };
+
+        // Extract the vote ID from the response
+        const voteId = voteResponse?.id || nanoid(); // Use a fallback ID if no ID in response
+
+        return {
+          success: true,
+          offline: false,
+          voteId,
+        };
       } catch (error) {
         console.error(
           "[OfflineVoteManager] Failed to submit vote online, falling back to offline:",
@@ -175,6 +277,22 @@ export const offlineVoteManager = {
       return false;
     }
 
+    // Verify token exists before attempting sync
+    const token = await getToken();
+    if (!token) {
+      console.error(
+        `[OfflineVoteManager] Cannot sync vote ${voteId} - no authentication token`
+      );
+
+      // Update the vote with the auth error
+      await offlineStorage.updateOfflineVote(voteId, {
+        error: "Authentication required",
+        retryCount: vote.retryCount + 1,
+      });
+
+      return false;
+    }
+
     try {
       // Submit to server directly
       await submitVoteToApi(vote.poolId, vote.optionId);
@@ -182,6 +300,7 @@ export const offlineVoteManager = {
       // Update vote status to synced
       await offlineStorage.updateOfflineVote(voteId, {
         status: "synced",
+        error: undefined, // Clear any previous errors
       });
 
       console.log(`[OfflineVoteManager] Vote ${voteId} synced successfully`);
@@ -189,21 +308,26 @@ export const offlineVoteManager = {
     } catch (error) {
       // Update retry count and possibly status
       const retryCount = vote.retryCount + 1;
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+
+      console.error(
+        `[OfflineVoteManager] Failed to sync vote ${voteId}: [Error: ${errorMsg}]`
+      );
+
       const updates: Partial<OfflineVote> = {
         retryCount,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: errorMsg,
       };
 
       // Mark as error if max retries reached
       if (retryCount >= MAX_RETRY_ATTEMPTS) {
         updates.status = "error";
+        console.log(
+          `[OfflineVoteManager] Max retry attempts (${MAX_RETRY_ATTEMPTS}) reached for vote ${voteId}`
+        );
       }
 
       await offlineStorage.updateOfflineVote(voteId, updates);
-      console.error(
-        `[OfflineVoteManager] Failed to sync vote ${voteId}:`,
-        error
-      );
       return false;
     }
   },
@@ -267,3 +391,48 @@ export const offlineVoteManager = {
     return removedCount;
   },
 };
+
+// Add a setup function at the end of the file - after the offlineVoteManager export
+// Set up network listeners to automatically sync when coming online
+export const setupOfflineVoteSync = () => {
+  let isSyncing = false;
+
+  // Subscribe to network state changes
+  const unsubscribe = NetInfo.addEventListener(async (state) => {
+    // Check if we're coming online and not already syncing
+    if (state.isConnected && !isSyncing) {
+      isSyncing = true;
+      try {
+        console.log(
+          "[OfflineVoteManager] Network connected, checking for offline votes to sync"
+        );
+
+        // Get pending votes
+        const pendingVotes = await offlineVoteManager.getPendingVotes();
+
+        // If we have pending votes, sync them
+        if (pendingVotes.length > 0) {
+          console.log(
+            `[OfflineVoteManager] Found ${pendingVotes.length} offline votes to sync`
+          );
+          await offlineVoteManager.syncAllPendingVotes();
+        } else {
+          console.log("[OfflineVoteManager] No offline votes to sync");
+        }
+      } catch (error) {
+        console.error(
+          "[OfflineVoteManager] Error syncing offline votes:",
+          error
+        );
+      } finally {
+        isSyncing = false;
+      }
+    }
+  });
+
+  // Return the unsubscribe function for cleanup
+  return unsubscribe;
+};
+
+// Auto-setup when this module is imported
+const unsubscribeNetInfo = setupOfflineVoteSync();

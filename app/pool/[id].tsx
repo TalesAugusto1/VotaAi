@@ -135,21 +135,30 @@ export default function VotingPoolDetailScreen() {
       // Submit vote
       await votesApi.submitVote(votingPool.id, selectedOption);
 
-      // Update UI
-      setHasVoted(true);
-      setUserVoteOptionId(selectedOption);
-
-      // Show success message
+      // Show success message first
       showModal({
         title: "Sucesso",
         message: "Seu voto foi registrado com sucesso!",
         type: "success",
       });
 
-      // Refresh voting pool data to get updated vote counts
-      const updatedPool = await votingPoolsApi.getVotingPoolById(votingPool.id);
-      if (updatedPool) {
-        setVotingPool(updatedPool);
+      // Update UI
+      setHasVoted(true);
+      setUserVoteOptionId(selectedOption);
+
+      // Try to refresh voting pool data to get updated vote counts,
+      // but don't worry if it fails - the user can refresh manually
+      try {
+        const updatedPool = await votingPoolsApi.getVotingPoolById(
+          votingPool.id,
+          true
+        );
+        if (updatedPool) {
+          setVotingPool(updatedPool);
+        }
+      } catch (refreshError) {
+        console.error("Non-critical error refreshing pool data:", refreshError);
+        // Don't show an error here as the vote still succeeded
       }
     } catch (error) {
       console.error("Error submitting vote:", error);
@@ -217,7 +226,7 @@ export default function VotingPoolDetailScreen() {
               text: "OK",
               onPress: () => {
                 hideModal();
-                router.replace("/(tabs)/");
+                router.replace("/");
               },
             },
           ],
@@ -439,6 +448,29 @@ export default function VotingPoolDetailScreen() {
             <ThemedText style={styles.sectionTitle}>
               {showResults ? "Resultados" : "Opções de Votação"}
             </ThemedText>
+
+            {/* Message explaining that results will be visible after voting */}
+            {!showResults && votingPool.status === "active" && (
+              <View
+                style={[
+                  styles.voteToSeeContainer,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(142, 142, 147, 0.2)"
+                      : "rgba(142, 142, 147, 0.1)",
+                  },
+                ]}
+              >
+                <MaterialIcons
+                  name="how-to-vote"
+                  size={16}
+                  color={isDark ? "#AEAEB2" : "#8E8E93"}
+                />
+                <ThemedText style={styles.voteToSeeText}>
+                  Vote para ver os resultados parciais
+                </ThemedText>
+              </View>
+            )}
 
             {(showResults
               ? [...votingPool.options].sort(
@@ -716,5 +748,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     marginLeft: 4,
+  },
+  voteToSeeContainer: {
+    padding: 12,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voteToSeeText: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 8,
   },
 });

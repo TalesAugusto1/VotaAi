@@ -1,6 +1,7 @@
 import { VotingPool } from "../types";
 import { offlineStorage } from "./offlineStorage";
 import NetInfo from "@react-native-community/netinfo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Cache expiration time (in milliseconds)
 const CACHE_EXPIRATION = 5 * 60 * 1000; // 5 minutes
@@ -305,5 +306,51 @@ export const cacheService = {
 
     // Also invalidate persistent storage cache
     await offlineStorage.invalidateCache(type);
+  },
+
+  // Add a new method to get cache age
+  async getCacheAge(key: string): Promise<number> {
+    try {
+      const timestamp = await AsyncStorage.getItem(`${key}_timestamp`);
+      if (!timestamp) return Infinity;
+
+      const cacheTime = parseInt(timestamp, 10);
+      const now = Date.now();
+      return now - cacheTime;
+    } catch (error) {
+      console.error(`Error getting cache age for ${key}:`, error);
+      return Infinity;
+    }
+  },
+
+  // When setting the cache, also set a timestamp
+  async setCacheWithTimestamp(key: string, data: any): Promise<void> {
+    try {
+      await AsyncStorage.setItem(key, JSON.stringify(data));
+      await AsyncStorage.setItem(`${key}_timestamp`, Date.now().toString());
+      console.log(`Cache set for ${key}`);
+    } catch (error) {
+      console.error(`Error setting cache for ${key}:`, error);
+    }
+  },
+
+  // Generic get method for any data
+  async get(key: string): Promise<string | null> {
+    try {
+      return await AsyncStorage.getItem(key);
+    } catch (error) {
+      console.error(`Error getting cache for ${key}:`, error);
+      return null;
+    }
+  },
+
+  // Generic set method for any data
+  async set(key: string, value: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(key, value);
+      console.log(`Cache set for ${key}`);
+    } catch (error) {
+      console.error(`Error setting cache for ${key}:`, error);
+    }
   },
 };

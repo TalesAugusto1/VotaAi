@@ -1,7 +1,7 @@
 import { FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
   StyleSheet,
   TouchableOpacity,
@@ -12,6 +12,8 @@ import { Colors } from "../constants/Colors";
 import { VotingPool } from "../types";
 import { formatDate, truncateText } from "../utils/helpers";
 import { ThemedText } from "./ThemedText";
+import { votesApi } from "../services/apiClient";
+import { useAuth } from "../context/AuthContext";
 
 interface VotingPoolCardProps {
   pool: VotingPool;
@@ -20,6 +22,28 @@ interface VotingPoolCardProps {
 export function VotingPoolCard({ pool }: VotingPoolCardProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const { user } = useAuth();
+  const [hasVoted, setHasVoted] = useState(false);
+
+  // Check if the current user has voted in this pool
+  useEffect(() => {
+    // Only check for active pools
+    if (pool.status === "active" && user) {
+      const checkVoteStatus = async () => {
+        try {
+          const result = await votesApi.hasUserVoted(pool.id);
+          setHasVoted(result.hasVoted);
+        } catch (error) {
+          console.error("Error checking vote status:", error);
+        }
+      };
+
+      checkVoteStatus();
+    } else if (pool.status === "closed") {
+      // For closed pools, always show the winner regardless of voting status
+      setHasVoted(true);
+    }
+  }, [pool.id, pool.status, user]);
 
   // Log image data for debugging
   useEffect(() => {
@@ -45,8 +69,13 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
 
   const showWinner =
     pool.status === "closed" && winningOption && winningOption.voteCount > 0;
+
+  // Only show leader if the user has already voted or the pool is closed
   const showLeader =
-    pool.status === "active" && winningOption && winningOption.voteCount > 0;
+    pool.status === "active" &&
+    hasVoted &&
+    winningOption &&
+    winningOption.voteCount > 0;
 
   // Get status text and color
   const getStatusInfo = () => {
@@ -148,7 +177,7 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
           </View>
         )}
 
-        {/* Current leader for active pools */}
+        {/* Current leader for active pools only if user has voted */}
         {showLeader && winningOption && (
           <View style={styles.leaderContainer}>
             <MaterialIcons
@@ -159,6 +188,29 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
             <ThemedText style={styles.leaderText}>
               Mais votado no momento: {truncateText(winningOption.text, 40)} (
               {winningOption.voteCount} votos)
+            </ThemedText>
+          </View>
+        )}
+
+        {/* Message for active pools where user hasn't voted yet */}
+        {pool.status === "active" && !hasVoted && user && (
+          <View
+            style={[
+              styles.voteToSeeContainer,
+              {
+                backgroundColor: isDark
+                  ? "rgba(142, 142, 147, 0.2)"
+                  : "rgba(142, 142, 147, 0.1)",
+              },
+            ]}
+          >
+            <MaterialIcons
+              name="how-to-vote"
+              size={16}
+              color={isDark ? "#AEAEB2" : "#8E8E93"}
+            />
+            <ThemedText style={styles.voteToSeeText}>
+              Vote para ver os resultados parciais
             </ThemedText>
           </View>
         )}
@@ -320,5 +372,19 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginLeft: 6,
     flex: 1,
+  },
+  voteToSeeContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  voteToSeeText: {
+    fontSize: 14,
+    fontWeight: "500",
+    marginLeft: 6,
+    color: "#8E8E93",
   },
 });

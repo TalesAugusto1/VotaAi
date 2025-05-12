@@ -60,6 +60,16 @@ export default function HomeScreen() {
       if (!poolsResponse || !poolsResponse.data) {
         console.error("Invalid pools response:", poolsResponse);
         setIsLoading(false);
+
+        // Show a user-friendly error message but only if we have no data
+        if (Object.keys(loadedPools).length === 0) {
+          showModal({
+            title: "Erro de conexão",
+            message:
+              "Não foi possível conectar ao servidor. Usando dados em cache quando disponíveis.",
+            type: "error",
+          });
+        }
         return;
       }
 
@@ -98,11 +108,17 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error("Error fetching voting pools:", error);
-      showModal({
-        title: "Erro",
-        message: "Falha ao carregar as votações. Tente novamente mais tarde.",
-        type: "error",
-      });
+
+      // Only show error modal if we have no pools loaded already
+      if (Object.keys(loadedPools).length === 0) {
+        showModal({
+          title: "Erro de conexão",
+          message:
+            "Não foi possível carregar as votações. Verificando dados em cache...",
+          type: "error",
+        });
+      }
+
       setIsLoading(false);
     }
   };
