@@ -1627,10 +1627,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 2,
+    alignItems: "center",
+    minHeight: 50,
   },
   tabButton: {
     paddingHorizontal: 4,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: "center",
     position: "relative",
     flex: 1,
@@ -1640,7 +1642,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   activeTabButton: {
-    paddingVertical: 10,
+    paddingVertical: 12,
   },
   tabIcon: {
     marginRight: 3,
@@ -1648,6 +1650,7 @@ const styles = StyleSheet.create({
   tabButtonText: {
     fontSize: 12,
     fontWeight: "500",
+    textAlignVertical: "center",
   },
   tabButtonIndicator: {
     position: "absolute",
@@ -1782,10 +1785,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   scrollContent: {
-    paddingVertical: 16,
+    paddingVertical: 8,
   },
   calendarContainer: {
     marginHorizontal: 16,
+    marginTop: 4,
+    marginBottom: 16,
     borderRadius: 16,
     overflow: "hidden",
     shadowColor: "#000",
@@ -1793,7 +1798,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 6,
     elevation: 4,
-    marginBottom: 16,
     borderWidth: 1,
     borderColor: "rgba(0, 0, 0, 0.04)",
   },
@@ -1825,7 +1829,8 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
     marginBottom: 16,
-    paddingTop: 4,
+    paddingTop: 2,
+    paddingBottom: 2,
     overflow: "hidden",
   },
   dateFilterIndicator: {
@@ -1901,7 +1906,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     borderRadius: 16,
     paddingHorizontal: 16,
-    paddingTop: 0, // Remove top padding
+    paddingTop: 0,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -1913,7 +1918,7 @@ const styles = StyleSheet.create({
   categoryFilterHeaderContainer: {
     flex: 1,
     justifyContent: "center",
-    minHeight: 60, // Ensure minimum height for vertical centering
+    minHeight: 60,
   },
   categoryFilterHeader: {
     flexDirection: "row",
@@ -1972,13 +1977,13 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end", // Modal slides up from bottom
+    justifyContent: "flex-end",
   },
   modalContent: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingBottom: 24,
-    maxHeight: "90%", // Increased max height
+    maxHeight: "90%",
   },
   modalHeader: {
     flexDirection: "row",
