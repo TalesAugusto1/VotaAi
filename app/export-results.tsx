@@ -227,7 +227,7 @@ export default function ExportResultsScreen() {
     try {
       setExporting(true);
 
-      // Generate CSV content
+      // Generate CSV content as text
       let csvContent = "Opção,Votos,Porcentagem\n";
 
       const totalVotes = pool.options.reduce(
@@ -260,20 +260,11 @@ export default function ExportResultsScreen() {
       csvContent += `"Total de votos",${totalVotes}\n`;
       csvContent += `"Data de exportação","${new Date().toLocaleString()}"\n`;
 
-      // Save the CSV file
-      const fileName = `votaai-resultado-${pool.id}.csv`;
-      const filePath = `${FileSystem.documentDirectory}${fileName}`;
-
-      await FileSystem.writeAsStringAsync(filePath, csvContent, {
-        encoding: FileSystem.EncodingType.UTF8,
+      // Share directly as text instead of saving a file
+      await Share.share({
+        message: csvContent,
+        title: "VotaAí - Resultados em CSV",
       });
-
-      // Share the file
-      await shareContent(
-        filePath,
-        "text/csv",
-        "Resultados da votação em formato CSV"
-      );
     } catch (error) {
       console.error("Error exporting as CSV:", error);
       Alert.alert("Erro", "Falha ao exportar como CSV");
