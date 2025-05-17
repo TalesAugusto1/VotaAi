@@ -5,7 +5,7 @@ import NetInfo from "@react-native-community/netinfo";
 import * as SecureStore from "expo-secure-store";
 
 // API base URL and token storage key definition
-const API_BASE_URL = "http://192.168.15.15:3000";
+const API_BASE_URL = "http://192.168.31.212:3000";
 const TOKEN_STORAGE_KEY = "VotaAi_token";
 
 // Maximum number of retry attempts for a vote

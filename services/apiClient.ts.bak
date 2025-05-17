@@ -3,7 +3,7 @@ import * as SecureStore from "expo-secure-store";
 import { User, Vote, VotingOption, VotingPool } from "../types";
 
 // API base URL
-const API_BASE_URL = "http://192.168.15.15:3000";
+const API_BASE_URL = "http92.168.15.15:3000";
 
 // Extended types for API responses
 interface APIVotingPool extends Omit<VotingPool, "options"> {
