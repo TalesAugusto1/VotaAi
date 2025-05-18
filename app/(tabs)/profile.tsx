@@ -1,6 +1,7 @@
 import { FontAwesome5, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
+import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
 import {
@@ -11,10 +12,12 @@ import {
   useColorScheme,
   View,
 } from "react-native";
+import { CustomModal } from "../../components/CustomModal";
 import { ThemedText } from "../../components/ThemedText";
 import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
 import { useNetwork } from "../../context/NetworkContext";
+import { useModal } from "../../hooks/useModal";
 import {
   authApi,
   resultsApi,
@@ -22,11 +25,7 @@ import {
   votingPoolsApi,
 } from "../../services/apiClient";
 import { offlineVoteManager } from "../../services/offlineVoteManager";
-import { Vote } from "../../types";
-import { CustomModal } from "../../components/CustomModal";
-import { useModal } from "../../hooks/useModal";
-import { router } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Vote, VotingPool } from "../../types";
 
 // Import cacheService to clear cache on logout
 import { cacheService } from "../../services/cacheService";
@@ -61,7 +60,7 @@ export default function ProfileScreen() {
         setIsLoading(true);
 
         // Get all user votes
-        const userVotes = await votesApi.getUserVotes();
+        const userVotes = await votesApi.getUserVotes(Number(user.id));
 
         // Get active and closed pools
         const activeResults = await resultsApi.getUserVotedPoolsResults(
@@ -93,31 +92,29 @@ export default function ProfileScreen() {
             )
             .slice(0, 3);
 
-          // Fetch pool details for each vote
-          const votesWithPools = await Promise.all(
-            sortedVotes.map(async (vote) => {
-              try {
-                const pool = await votingPoolsApi.getVotingPoolById(
-                  vote.poolId
-                );
-                return {
-                  ...vote,
-                  pool: pool
-                    ? {
-                        title: pool.title,
-                        status: pool.status as "active" | "closed",
-                      }
-                    : undefined,
-                };
-              } catch (error) {
-                console.error(
-                  `Error fetching pool for vote ${vote.id}:`,
-                  error
-                );
-                return vote;
-              }
-            })
-          );
+          // Fetch all pool details at once using getVotingPoolByIds
+          const poolIds = sortedVotes.map((vote) => vote.poolId);
+          const pools = await votingPoolsApi.getVotingPoolByIds(poolIds);
+
+          // Create a map for quick lookup
+          const poolMap = new Map<string, VotingPool>();
+          pools.forEach((pool) => {
+            poolMap.set(pool.id, pool);
+          });
+
+          // Attach pool info to each vote
+          const votesWithPools = sortedVotes.map((vote) => {
+            const pool = poolMap.get(vote.poolId);
+            return {
+              ...vote,
+              pool: pool
+                ? {
+                    title: pool.title,
+                    status: pool.status as "active" | "closed",
+                  }
+                : undefined,
+            };
+          });
 
           setRecentVotes(votesWithPools);
         }

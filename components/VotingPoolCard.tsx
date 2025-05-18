@@ -9,11 +9,11 @@ import {
   useColorScheme,
 } from "react-native";
 import { Colors } from "../constants/Colors";
+import { useAuth } from "../context/AuthContext";
+import { votesApi } from "../services/apiClient";
 import { VotingPool } from "../types";
 import { formatDate, truncateText } from "../utils/helpers";
 import { ThemedText } from "./ThemedText";
-import { votesApi } from "../services/apiClient";
-import { useAuth } from "../context/AuthContext";
 
 interface VotingPoolCardProps {
   pool: VotingPool;
@@ -230,17 +230,6 @@ export function VotingPoolCard({ pool }: VotingPoolCardProps) {
                 : `Termina em ${formatDate(pool.endDate)}`}
             </ThemedText>
           </View>
-
-          {pool.anonymous && (
-            <View style={styles.anonymousContainer}>
-              <MaterialIcons
-                name="visibility-off"
-                size={14}
-                color={isDark ? "#AEAEB2" : "#8E8E93"}
-              />
-              <ThemedText style={styles.anonymous}>Anônima</ThemedText>
-            </View>
-          )}
 
           <View style={styles.votesContainer}>
             <FontAwesome5

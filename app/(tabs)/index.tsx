@@ -10,15 +10,15 @@ import {
   useColorScheme,
   View,
 } from "react-native";
+import { CustomModal } from "../../components/CustomModal";
+import { PoolSkeleton } from "../../components/PoolSkeleton";
 import { ThemedText } from "../../components/ThemedText";
 import { VotingPoolCard } from "../../components/VotingPoolCard";
-import { PoolSkeleton } from "../../components/PoolSkeleton";
 import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
+import { useModal } from "../../hooks/useModal";
 import { votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
-import { CustomModal } from "../../components/CustomModal";
-import { useModal } from "../../hooks/useModal";
 
 export default function HomeScreen() {
   const [allPoolIds, setAllPoolIds] = useState<string[]>([]);
@@ -76,25 +76,20 @@ export default function HomeScreen() {
       // Set the IDs to render skeleton placeholders
       setAllPoolIds(poolsResponse.data.map((pool) => pool.id));
 
-      // For each pool ID, either load from cache or fetch
-      poolsResponse.data.forEach(async (basicPool) => {
-        try {
-          const pool = await votingPoolsApi.getVotingPoolById(
-            basicPool.id,
-            forceRefresh
-          );
+    // Fetch all pools at once using getVotingPoolByIds
+    const ids = poolsResponse.data.map((pool) => pool.id);
+    const pools = await votingPoolsApi.getVotingPoolByIds(ids, forceRefresh);
 
-          if (pool) {
-            // Add this pool to the loaded pools
-            setLoadedPools((current) => ({
-              ...current,
-              [basicPool.id]: pool,
-            }));
-          }
-        } catch (error) {
-          console.error(`Error loading pool ${basicPool.id}:`, error);
-        }
+    // Add each loaded pool to the loadedPools state
+    if (pools && pools.length > 0) {
+      setLoadedPools((current) => {
+        const updated = { ...current };
+        pools.forEach((pool) => {
+          updated[pool.id] = pool;
+        });
+        return updated;
       });
+    }
 
       // Once all pools are processed, we can set isLoading to false
       setIsLoading(false);

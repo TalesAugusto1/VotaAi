@@ -7,7 +7,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,19 +15,18 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Switch,
   TextInput,
   TouchableOpacity,
   View,
-  useColorScheme,
+  useColorScheme
 } from "react-native";
+import { CustomModal } from "../components/CustomModal";
 import { ThemedText } from "../components/ThemedText";
 import { ThemedView } from "../components/ThemedView";
 import { Colors } from "../constants/Colors";
 import { useAuth } from "../context/AuthContext";
-import { votingPoolsApi } from "../services/apiClient";
-import { CustomModal } from "../components/CustomModal";
 import { useModal } from "../hooks/useModal";
+import { votingPoolsApi } from "../services/apiClient";
 
 // Define interfaces for type safety
 interface OptionForm {
@@ -66,7 +65,7 @@ export default function CreatePoolScreen() {
   const [endDate, setEndDate] = useState(
     new Date(new Date().setDate(new Date().getDate() + 7))
   );
-  const [isAnonymous, setIsAnonymous] = useState(false);
+  const [isAnonymous] = useState(true);
   const [image, setImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [options, setOptions] = useState<OptionForm[]>([
     { text: "", description: "" },
@@ -440,16 +439,6 @@ export default function CreatePoolScreen() {
                 <Ionicons name="calendar" size={20} color={Colors.light.tint} />
               </TouchableOpacity>
             </View>
-          </View>
-
-          <View style={styles.switchContainer}>
-            <ThemedText style={styles.label}>Votação Anônima</ThemedText>
-            <Switch
-              value={isAnonymous}
-              onValueChange={setIsAnonymous}
-              trackColor={{ false: "#767577", true: Colors.light.tint }}
-              thumbColor={isAnonymous ? "#FFFFFF" : "#f4f3f4"}
-            />
           </View>
 
           <ThemedText style={styles.label}>Imagem da Votação</ThemedText>

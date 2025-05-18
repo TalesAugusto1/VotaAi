@@ -1,11 +1,10 @@
-import { OfflineVote, offlineStorage } from "./offlineStorage";
-import { votesApi } from "./apiClient";
-import { nanoid } from "./utils";
 import NetInfo from "@react-native-community/netinfo";
 import * as SecureStore from "expo-secure-store";
+import { OfflineVote, offlineStorage } from "./offlineStorage";
+import { nanoid } from "./utils";
 
 // API base URL and token storage key definition
-const API_BASE_URL = "http://192.168.31.212:3000";
+const API_BASE_URL = "http://192.168.1.110:3000";
 const TOKEN_STORAGE_KEY = "VotaAi_token";
 
 // Maximum number of retry attempts for a vote

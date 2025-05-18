@@ -1,11 +1,10 @@
+import NetInfo from "@react-native-community/netinfo";
 import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import { User, Vote, VotingOption, VotingPool } from "../types";
+import { API_BASE_URL, TOKEN_STORAGE_KEY } from "./apiConfig";
 import { cacheService } from "./cacheService";
 import { offlineStorage } from "./offlineStorage";
-import { offlineVoteManager } from "./offlineVoteManager";
-import NetInfo from "@react-native-community/netinfo";
-import { API_BASE_URL, TOKEN_STORAGE_KEY } from "./apiConfig";
 
 // Log the API base URL for debugging
 console.log("API client initialized with base URL:", API_BASE_URL);
@@ -745,7 +744,8 @@ export const votingPoolsApi = {
   // Get a voting pool by ID
   async getVotingPoolById(
     id: string,
-    forceRefresh = false
+    forceRefresh = false,
+    includeVotes = true
   ): Promise<VotingPool | null> {
     try {
       // Check network status first
@@ -758,7 +758,7 @@ export const votingPoolsApi = {
         try {
           // Use fetchWithRetry instead of direct fetch
           const response = await fetchWithRetry(
-            `${API_BASE_URL}/api/voting-pools/${id}`,
+            `${API_BASE_URL}/api/voting-pools/${id}?includeVotes=${includeVotes}`,
             {}
           );
 
@@ -794,7 +794,7 @@ export const votingPoolsApi = {
       }
 
       // If no cached data or force refresh, fetch from API
-      const response = await fetch(`${API_BASE_URL}/api/voting-pools/${id}`);
+      const response = await fetch(`${API_BASE_URL}/api/voting-pools/${id}?includeVotes=${includeVotes}`);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -818,6 +818,89 @@ export const votingPoolsApi = {
     } catch (error) {
       console.error("Get voting pool error:", error);
       return null;
+    }
+  },
+  
+  async getVotingPoolByIds(
+    ids: string[],
+    forceRefresh = false,
+    includeVotes = true
+  ): Promise<VotingPool[]> {
+    try {
+      // Check network status first
+      const networkState = await NetInfo.fetch();
+      const isOnline = networkState.isConnected === true;
+  
+      // Build query string for multiple ids
+      const queryString = ids.join(",");
+  
+      // If we're online and not forcing a refresh, try to fetch fresh data first
+      if (isOnline && !forceRefresh) {
+        try {
+          const response = await fetchWithRetry(
+            `${API_BASE_URL}/api/voting-pools/batchPools?ids=${queryString}&includeVotes=${includeVotes}`,
+            {}
+          );
+  
+          if (response.status === 404) {
+            console.log(`Voting pools not found on server`);
+            return [];
+          }
+  
+          const data = await handleResponse<APIVotingPool[]>(response);
+          const transformedData = data.map(transformPoolData);
+  
+          // Update the cache for each pool
+          for (const pool of transformedData) {
+            cacheService.setVotingPoolById(pool.id, pool);
+          }
+  
+          return transformedData;
+        } catch (error) {
+          console.error(`Error fetching voting pools batch:`, error);
+          // Continue to try cache if fetch fails
+        }
+      }
+  
+      // If offline, force refresh was requested, or fresh fetch failed, check cache
+      if (!forceRefresh) {
+        const cachedPools: VotingPool[] = [];
+        for (const id of ids) {
+          const cacheResult = await cacheService.getVotingPoolById(id);
+          if (cacheResult.isCached && cacheResult.data) {
+            console.log(`Using cached pool ${id}`);
+            cachedPools.push(cacheResult.data);
+          }
+        }
+        if (cachedPools.length > 0) {
+          return cachedPools;
+        }
+      }
+  
+      // If no cached data or force refresh, fetch from API
+      const response = await fetch(
+        `${API_BASE_URL}/api/voting-pools/batch?ids=${queryString}&includeVotes=${includeVotes}`
+      );
+  
+      if (!response.ok) {
+        if (response.status === 404) {
+          return [];
+        }
+        throw new Error("Failed to get voting pools batch");
+      }
+  
+      const pools = (await response.json()) as APIVotingPool[];
+      const transformedPools = pools.map(transformPoolData);
+  
+      // Update the cache for each pool
+      for (const pool of transformedPools) {
+        cacheService.setVotingPoolById(pool.id, pool);
+      }
+  
+      return transformedPools;
+    } catch (error) {
+      console.error("Get voting pools batch error:", error);
+      return [];
     }
   },
 
@@ -1018,7 +1101,9 @@ export const votingPoolsApi = {
   // Get multiple voting pools by IDs in a single request
   async getBatchVotingPools(
     ids: string[],
-    forceRefresh = false
+    forceRefresh = false,
+    includeVotes = true
+
   ): Promise<Record<string, VotingPool>> {
     try {
       // Check network status first
@@ -1034,7 +1119,7 @@ export const votingPoolsApi = {
           console.log(`Fetching fresh batch data for ${ids.length} pools`);
 
           const response = await fetch(
-            `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}`
+            `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}&includeVotes=${includeVotes}`
           );
 
           if (!response.ok) {
@@ -1107,7 +1192,7 @@ export const votingPoolsApi = {
       // Fetch from API
       const idsParam = uncachedIds.join(",");
       const response = await fetch(
-        `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}`
+        `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}&includeVotes=${includeVotes}`
       );
 
       if (!response.ok) {
@@ -1178,7 +1263,7 @@ export const votesApi = {
   },
 
   // Get all votes for the current user
-  async getUserVotes(): Promise<Vote[]> {
+  async getUserVotes(userId: number): Promise<Vote[]> {
     const token = await getToken();
 
     if (!token) {
@@ -1190,12 +1275,13 @@ export const votesApi = {
       const headers = await getAuthHeaders();
       console.log("Fetching user votes with token");
 
-      const response = await fetch(`${API_BASE_URL}/api/votes/user`, {
+      const response = await fetch(`${API_BASE_URL}/api/votes/user?userId=${userId}`, {
         headers,
       });
 
       if (!response.ok) {
         console.error("Error fetching user votes:", response.status);
+        console.log(response)
         if (response.status === 401) {
           await removeToken();
           return [];
@@ -1206,15 +1292,10 @@ export const votesApi = {
       const data = await response.json();
 
       // The server returns { regularVotes, anonymousParticipation }
-      const regularVotes = data.regularVotes || [];
       const anonymousVotes = data.anonymousParticipation || [];
 
-      console.log(
-        `Retrieved ${regularVotes.length} regular votes and ${anonymousVotes.length} anonymous votes`
-      );
-
       // Return regular votes - they have full details
-      return regularVotes;
+      return anonymousVotes;
     } catch (error) {
       console.error("getUserVotes error:", error);
       return [];

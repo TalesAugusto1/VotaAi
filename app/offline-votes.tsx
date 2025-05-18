@@ -1,22 +1,22 @@
-import React, { useState, useEffect } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { Stack, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
   StyleSheet,
   Text,
-  View,
-  FlatList,
   TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
   useColorScheme,
+  View,
 } from "react-native";
-import { Stack, useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Colors } from "../constants/Colors";
+import { useNetwork } from "../context/NetworkContext";
+import { votingPoolsApi } from "../services/apiClient";
 import { OfflineVote } from "../services/offlineStorage";
 import { offlineVoteManager } from "../services/offlineVoteManager";
-import { votingPoolsApi } from "../services/apiClient";
-import { useNetwork } from "../context/NetworkContext";
-import { Colors } from "../constants/Colors";
-import { formatDateTime, timeAgo } from "../services/utils";
+import { timeAgo } from "../services/utils";
 
 export default function OfflineVotesScreen() {
   const [votes, setVotes] = useState<OfflineVote[]>([]);
@@ -47,7 +47,7 @@ export default function OfflineVotesScreen() {
       await Promise.all(
         poolIds.map(async (poolId) => {
           try {
-            const pool = await votingPoolsApi.getVotingPoolById(poolId);
+            const pool = await votingPoolsApi.getVotingPoolById(poolId, undefined, false);
             if (pool) {
               poolNamesMap[poolId] = pool.title;
             }

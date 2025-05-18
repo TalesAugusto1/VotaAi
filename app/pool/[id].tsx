@@ -12,16 +12,16 @@ import {
   useColorScheme,
   View,
 } from "react-native";
+import { CustomModal } from "../../components/CustomModal";
+import { PoolAnalytics } from "../../components/PoolAnalytics";
 import { ThemedText } from "../../components/ThemedText";
 import { VotingOptionCard } from "../../components/VotingOptionCard";
 import { Colors } from "../../constants/Colors";
 import { useAuth } from "../../context/AuthContext";
+import { useModal } from "../../hooks/useModal";
 import { votesApi, votingPoolsApi } from "../../services/apiClient";
 import { VotingPool } from "../../types";
 import { formatDate, isVotingPoolActive } from "../../utils/helpers";
-import { CustomModal } from "../../components/CustomModal";
-import { useModal } from "../../hooks/useModal";
-import { PoolAnalytics } from "../../components/PoolAnalytics";
 
 export default function VotingPoolDetailScreen() {
   const { id, analytics } = useLocalSearchParams();
@@ -138,6 +138,7 @@ export default function VotingPoolDetailScreen() {
 
       // Submit vote
       await votesApi.submitVote(votingPool.id, selectedOption);
+      votingPoolsApi.invalidatePoolsCache("active");
 
       // Show success message first
       showModal({
@@ -458,17 +459,6 @@ export default function VotingPoolDetailScreen() {
                   : `Termina em ${formatDate(votingPool.endDate)}`}
               </ThemedText>
             </View>
-
-            {votingPool.anonymous && (
-              <View style={styles.metaItem}>
-                <MaterialIcons
-                  name="visibility-off"
-                  size={18}
-                  color={isDark ? "#AEAEB2" : "#8E8E93"}
-                />
-                <ThemedText style={styles.metaText}>Votação anônima</ThemedText>
-              </View>
-            )}
 
             <View style={styles.metaItem}>
               <FontAwesome5
