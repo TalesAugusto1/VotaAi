@@ -1,6 +1,14 @@
 import { User, Vote, VotingPool } from "../types";
 import { generateId } from "../utils/helpers";
 import { users, votes, votingPools } from "./mockData";
+import axios, {
+  InternalAxiosRequestConfig,
+  AxiosResponse,
+  AxiosError,
+} from "axios";
+import { API_URL } from "../config";
+import * as SecureStore from "expo-secure-store";
+import { API_BASE_URL, TOKEN_STORAGE_KEY } from "./apiConfig";
 
 // Simulate API delay for realistic experience
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -139,3 +147,39 @@ export const votesService = {
     );
   },
 };
+
+// Create axios instance
+export const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+// Add a request interceptor to include the auth token
+api.interceptors.request.use(
+  async (config: InternalAxiosRequestConfig) => {
+    const token = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
+    if (token && config.headers) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error: AxiosError) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add a response interceptor to handle errors
+api.interceptors.response.use(
+  (response: AxiosResponse) => response,
+  async (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      // Handle unauthorized access
+      await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+      // In React Native, we can't use window.location
+      // Instead, we'll let the app handle the navigation
+    }
+    return Promise.reject(error);
+  }
+);

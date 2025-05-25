@@ -526,7 +526,7 @@ export const votingPoolsApi = {
       if (isOnline && page === 1 && !forceRefresh) {
         try {
           // Fetch from API first
-          const url = `${API_BASE_URL}/api/voting-pools`;
+          const url = `${API_BASE_URL}/api/date-pools`;
           const params = new URLSearchParams();
           if (status) {
             params.append("status", status);
@@ -615,7 +615,7 @@ export const votingPoolsApi = {
       }
 
       // If forced refresh, offline with no cache, or not first page, fetch from API
-      const url = `${API_BASE_URL}/api/voting-pools`;
+      const url = `${API_BASE_URL}/api/date-pools`;
       const params = new URLSearchParams();
       if (status) {
         params.append("status", status);
@@ -758,7 +758,7 @@ export const votingPoolsApi = {
         try {
           // Use fetchWithRetry instead of direct fetch
           const response = await fetchWithRetry(
-            `${API_BASE_URL}/api/voting-pools/${id}`,
+            `${API_BASE_URL}/api/date-pools/${id}`,
             {}
           );
 
@@ -794,7 +794,7 @@ export const votingPoolsApi = {
       }
 
       // If no cached data or force refresh, fetch from API
-      const response = await fetch(`${API_BASE_URL}/api/voting-pools/${id}`);
+      const response = await fetch(`${API_BASE_URL}/api/date-pools/${id}`);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -922,7 +922,7 @@ export const votingPoolsApi = {
     }
 
     // URL for the API endpoint
-    const url = `${API_BASE_URL}/api/voting-pools`;
+    const url = `${API_BASE_URL}/api/date-pools`;
 
     // Get auth headers
     const headers = await getAuthHeaders();
@@ -991,7 +991,7 @@ export const votingPoolsApi = {
   async deleteVotingPool(id: string): Promise<boolean> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE_URL}/api/voting-pools/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/date-pools/${id}`, {
         method: "DELETE",
         headers,
       });
@@ -1034,7 +1034,7 @@ export const votingPoolsApi = {
           console.log(`Fetching fresh batch data for ${ids.length} pools`);
 
           const response = await fetch(
-            `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}`
+            `${API_BASE_URL}/api/date-pools/batch?ids=${idsParam}`
           );
 
           if (!response.ok) {
@@ -1107,7 +1107,7 @@ export const votingPoolsApi = {
       // Fetch from API
       const idsParam = uncachedIds.join(",");
       const response = await fetch(
-        `${API_BASE_URL}/api/voting-pools/batch?ids=${idsParam}`
+        `${API_BASE_URL}/api/date-pools/batch?ids=${idsParam}`
       );
 
       if (!response.ok) {

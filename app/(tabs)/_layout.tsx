@@ -1,4 +1,4 @@
-import { FontAwesome5, Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { FontAwesome, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Tabs, router } from "expo-router";
 import React, { useEffect } from "react";
 import { Platform, useColorScheme } from "react-native";
@@ -25,60 +25,60 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor:
-          Colors[colorScheme === "dark" ? "dark" : "light"].tint,
+        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
+        tabBarInactiveTintColor: Colors[colorScheme ?? "light"].tabIconDefault,
         tabBarStyle: {
-          height: Platform.OS === "ios" ? 85 : 60,
-          paddingBottom: Platform.OS === "ios" ? 30 : 10,
+          backgroundColor: Colors[colorScheme ?? "light"].background,
         },
         headerStyle: {
-          backgroundColor:
-            Colors[colorScheme === "dark" ? "dark" : "light"].background,
+          backgroundColor: Colors[colorScheme ?? "light"].background,
         },
-        headerTintColor: Colors[colorScheme === "dark" ? "dark" : "light"].text,
+        headerTintColor: Colors[colorScheme ?? "light"].text,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Votações Abertas",
+          title: "Home",
           tabBarIcon: ({ color }) => (
-            <FontAwesome5 name="vote-yea" size={24} color={color} />
+            <FontAwesome name="home" size={24} color={color} />
           ),
-          tabBarLabel: "Votações",
         }}
       />
-
+      <Tabs.Screen
+        name="events"
+        options={{
+          title: "Events",
+          tabBarIcon: ({ color }) => (
+            <FontAwesome name="calendar" size={24} color={color} />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="calendar-pools"
         options={{
-          title: "Calendário",
+          title: "Date Pools",
           tabBarIcon: ({ color }) => (
-            <MaterialIcons name="event" size={24} color={color} />
+            <FontAwesome name="calendar-plus-o" size={24} color={color} />
           ),
-          tabBarLabel: "Calendário",
         }}
       />
-
       <Tabs.Screen
         name="results"
         options={{
-          title: "Resultados",
+          title: "Results",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="stats-chart" size={24} color={color} />
+            <FontAwesome name="bar-chart" size={24} color={color} />
           ),
-          tabBarLabel: "Resultados",
         }}
       />
-
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Meu Perfil",
+          title: "Profile",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="person" size={24} color={color} />
+            <FontAwesome name="user" size={24} color={color} />
           ),
-          tabBarLabel: "Perfil",
         }}
       />
     </Tabs>

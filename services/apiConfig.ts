@@ -2,7 +2,7 @@
 // Central place to store API-related configuration values
 
 // API base URL
-export const API_BASE_URL = "http://192.168.31.212:3000";
+export const API_BASE_URL = "http://192.168.15.15:3000";
 
 // Token storage key
 export const TOKEN_STORAGE_KEY = "VotaAi_token";
