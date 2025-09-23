@@ -5,17 +5,17 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import "react-native-reanimated";
-import { AuthProvider, useAuth } from "../context/AuthContext";
-import { NetworkProvider } from "../context/NetworkContext";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { PendingVotesIndicator } from "../components/PendingVotesIndicator";
+import { AuthProvider, useAuth } from "../context/AuthContext";
+import { NetworkProvider } from "../context/NetworkContext";
 
 // Prevent the splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
 // This function wraps the app content and handles auth redirection
 function RootLayoutContent() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, error } = useAuth();
   const segments = useSegments();
 
   useEffect(() => {
@@ -32,8 +32,24 @@ function RootLayoutContent() {
     }
   }, [user, segments, isLoading]);
 
+  // Show loading screen while checking authentication
   if (isLoading) {
-    return null; // Still loading, show nothing
+    return (
+      <ThemeProvider value={DarkTheme}>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="pool/[id]" options={{ headerShown: false }} />
+          <Stack.Screen name="create-pool" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="export-results"
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    );
   }
 
   return (

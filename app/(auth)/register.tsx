@@ -123,6 +123,12 @@ export default function RegisterScreen() {
     }
   };
 
+  const handleRetry = () => {
+    // Clear error and try again
+    setError("");
+    handleRegister();
+  };
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -206,7 +212,19 @@ export default function RegisterScreen() {
           />
 
           {error ? (
-            <ThemedText style={styles.errorText}>{error}</ThemedText>
+            <View style={styles.errorContainer}>
+              <ThemedText style={styles.errorText}>{error}</ThemedText>
+              {error.includes("conexão") && (
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={handleRetry}
+                >
+                  <ThemedText style={styles.retryText}>
+                    Tentar Novamente
+                  </ThemedText>
+                </TouchableOpacity>
+              )}
+            </View>
           ) : null}
 
           <TouchableOpacity
@@ -280,6 +298,22 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#FF453A",
     marginBottom: 16,
+  },
+  errorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: Colors.light.tint,
+    borderRadius: 12,
+    padding: 16,
+    marginLeft: 16,
+  },
+  retryText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
   registerButton: {
     backgroundColor: Colors.light.tint,

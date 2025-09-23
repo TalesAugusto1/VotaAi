@@ -79,13 +79,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error("Login error:", error);
       }
 
+      let errorMessage = "Falha ao fazer login. Tente novamente.";
+
+      if (error instanceof Error) {
+        errorMessage = error.message;
+
+        // Handle network errors specifically
+        if (
+          errorMessage.includes("Network request failed") ||
+          errorMessage.includes("fetch")
+        ) {
+          errorMessage =
+            "Erro de conexão. Verifique sua internet e tente novamente.";
+        }
+      }
+
       setState({
         user: null,
         isLoading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Falha ao fazer login. Tente novamente.",
+        error: errorMessage,
       });
     }
   };
@@ -124,8 +136,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error instanceof Error) {
         errorMessage = error.message;
 
-        // Handle common error cases
+        // Handle network errors specifically
         if (
+          errorMessage.includes("Network request failed") ||
+          errorMessage.includes("fetch")
+        ) {
+          errorMessage =
+            "Erro de conexão. Verifique sua internet e tente novamente.";
+        } else if (
           errorMessage.includes("CPF already") ||
           errorMessage.includes("Email already")
         ) {
